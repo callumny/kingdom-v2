@@ -10,10 +10,12 @@ import (
 var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
 
 // View renders the foundation screen without owning application state.
-func View(width, height int) tea.View {
-	content := titleStyle.Render("Kingdom") + "\n\n" +
-		"Local workspace ready. Discovery and role assignment will arrive in v1.\n\n" +
-		"Press q to quit."
+func View(width, height int, setupRequired bool) tea.View {
+	status := "Configuration ready."
+	if setupRequired {
+		status = "Setup required. Model discovery and role assignment will arrive in the next stage."
+	}
+	content := titleStyle.Render("Kingdom") + "\n\n" + status + "\n\nPress q to quit."
 	if width > 0 && height > 0 {
 		content += fmt.Sprintf("\n\n%d×%d", width, height)
 	}

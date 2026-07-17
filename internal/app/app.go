@@ -2,6 +2,7 @@ package app
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/ui"
 )
 
@@ -9,9 +10,12 @@ import (
 type Model struct {
 	width  int
 	height int
+	config config.Config
+	setup  bool
 }
 
-func New() Model { return Model{} }
+func New(c config.Config) Model     { return Model{config: c, setup: c.RequiresSetup()} }
+func (m Model) RequiresSetup() bool { return m.setup }
 
 func (m Model) Init() tea.Cmd { return nil }
 
@@ -27,4 +31,4 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() tea.View { return ui.View(m.width, m.height) }
+func (m Model) View() tea.View { return ui.View(m.width, m.height, m.setup) }
