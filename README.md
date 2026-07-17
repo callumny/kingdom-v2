@@ -1,6 +1,6 @@
 # Kingdom
 
-Kingdom is a local-only terminal application for configuring a king, council, and workers; coordinating memory, permissioned tools, skills, and topology; and presenting that system in a TUI. The initial foundation is a single Go module and binary with a minimal Bubble Tea v2 interface. v1 topology discovers running endpoints/models and assigns roles; process start/stop management is deferred.
+Kingdom is a local-only terminal application for configuring a king, council, and workers; coordinating memory, permissioned tools, skills, and topology; and presenting that system in a TUI. It discovers already-running Ollama, LM Studio, and MLX-compatible endpoints, lets the user assign models to roles, and atomically saves the reviewed configuration. Starting and stopping model-server processes is deferred to a later milestone.
 
 ## Development
 
@@ -11,4 +11,7 @@ make check
 go run ./cmd/kingdom
 ```
 
-Press `q` or `Ctrl+C` to exit.
+On first run, Kingdom opens setup and scans the default local endpoints. Use arrows or `j`/`k` to
+navigate, `Enter` to assign, `n` to continue from role assignment, `r` to rescan, and `a` to add a
+custom local endpoint. Press `q` or `Ctrl+C` to exit. While the reviewed configuration is being saved,
+keyboard input is briefly blocked until the atomic write succeeds or fails.

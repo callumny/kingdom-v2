@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/app"
 	"github.com/callumny/kingdom/internal/config"
+	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/topology"
 )
 
 func main() {
@@ -17,7 +21,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	m := app.New(c)
+	d := discovery.New(discovery.DefaultOptions())
+	m := app.NewWithDepsAndSave(c, discovery.DefaultEndpoints(), func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
+		return func() tea.Msg {
+			rs, _ := d.Discover(ctx, candidates)
+			out := make([]setup.EndpointResult, len(rs))
+			for i, r := range rs {
+				out[i] = setup.EndpointResult{Endpoint: r.Endpoint, Models: r.Models, Err: r.Err}
+			}
+			return app.DiscoveryMsg{Generation: gen, Results: out}
+		}
+	}, func(next config.Config) error { return config.Save(path, next) })
 	program := tea.NewProgram(m)
 	if _, err := program.Run(); err != nil {
 		log.Fatal(err)
