@@ -32,8 +32,8 @@ func TestViewReflectsSetupState(t *testing.T) {
 	}
 
 	c := completeConfig()
-	if got := New(c).View().Content; !strings.Contains(got, "Configuration ready") {
-		t.Fatalf("complete config view = %q, want ready status", got)
+	if got := New(c).View().Content; !strings.Contains(got, "Ctrl+Enter send") {
+		t.Fatalf("complete config view = %q, want chat controls", got)
 	}
 }
 
@@ -219,7 +219,7 @@ func TestSaveSuccessBecomesReady(t *testing.T) {
 
 func TestSetupReopensFromReady(t *testing.T) {
 	m := New(completeConfig())
-	m, _ = update(m, key("s"))
+	m, _ = update(m, key("ctrl+s"))
 	if !m.setup || m.screen != setup.StateDiscovery {
 		t.Fatal("setup not reopened")
 	}
@@ -232,7 +232,7 @@ func TestReopenResetsTransientStateAndClampsCursor(t *testing.T) {
 		return func() tea.Msg { return DiscoveryMsg{Generation: gen} }
 	})
 	m.modelIndex, m.role, m.perfFocus, m.formActive, m.saving = 9, 2, 1, false, false
-	m, _ = update(m, key("s"))
+	m, _ = update(m, key("ctrl+s"))
 	if m.modelIndex != 0 || m.role != 0 || m.perfFocus != 0 || m.formActive || m.saving {
 		t.Fatalf("transient state not reset: index=%d role=%d focus=%d form=%v saving=%v", m.modelIndex, m.role, m.perfFocus, m.formActive, m.saving)
 	}
@@ -272,7 +272,7 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 			return DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "local"}, Models: []discovery.Model{{ID: "k"}, {ID: "w"}}}}}
 		}
 	}, nil)
-	m, cmd := update(m, key("s"))
+	m, cmd := update(m, key("ctrl+s"))
 	if !m.setup || m.screen != setup.StateDiscovery || m.workflow.State != setup.StateDiscovery {
 		t.Fatalf("reopen state: setup=%v screen=%v workflow=%v", m.setup, m.screen, m.workflow.State)
 	}

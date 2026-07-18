@@ -7,6 +7,8 @@ Kingdom is deliberately small and layered:
 * `internal/config` validates and atomically persists versioned configuration.
 * `internal/topology` defines local endpoints and king, council, and worker assignments.
 * `internal/discovery` queries Ollama and OpenAI-compatible endpoints and normalizes their models.
+* `internal/modelapi` translates normalized chat messages into provider-specific local HTTP requests.
+* `internal/orchestration` coordinates the bounded King, Worker, and Council request lifecycle.
 * `internal/setup` owns the pure setup workflow, draft configuration, endpoint merging, and
   stale-discovery generation guard.
 * `internal/ui` renders presentation without owning domain or infrastructure logic.
@@ -16,7 +18,20 @@ and the composition root connects them. Provider-specific HTTP payloads do not e
 package; callers receive one normalized model type and ordered endpoint results. The setup package
 does not import Bubble Tea, perform HTTP requests, or write files. `internal/app` translates key
 presses and asynchronous messages into setup transitions, while `cmd/kingdom` injects the concrete
-discover and save functions.
+discover, save, and orchestration functions.
+
+The model API supports the two topology endpoint kinds without exposing their wire formats: Ollama
+uses `/api/chat`, while OpenAI-compatible runtimes use `/chat/completions`. Requests are non-streaming
+in this stage. Endpoints are revalidated as local before every request, response bodies are bounded,
+redirects are disabled, and the single retry is limited to transient failures with a cancellation-aware
+delay.
+
+The orchestration engine is independent of Bubble Tea. The King can return a final response or a
+small JSON delegation plan. Worker tasks execute concurrently up to the configured limit, Council
+reviews execute in deterministic slots, and the King synthesizes their ordered outcomes. Four King
+calls and 32 tasks per delegation are hard safety limits. The engine publishes bounded lifecycle
+events that the app consumes one at a time, so progress can be rendered without coupling the engine
+to the terminal.
 
 The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears
 old results before a rescan and uses monotonically increasing generations so late responses cannot
@@ -27,6 +42,6 @@ filesystem operation already in progress.
 
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, model discovery, and
-the complete TUI setup/assignment flow. The next stage will orchestrate requests through the assigned
-roles. Starting and stopping model-server processes is a future milestone. SQLite is planned for the
-later persistence stage.
+the complete TUI setup/assignment flow, local model API adapters, and King-led orchestration with a
+minimal chat screen. The next stage adds permissioned tools. Starting and stopping model-server
+processes is a future milestone. SQLite is planned for the later persistence stage.

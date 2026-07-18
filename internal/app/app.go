@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 	"github.com/callumny/kingdom/internal/ui"
@@ -25,12 +27,22 @@ type Model struct {
 	gate          *setup.GenerationGate
 	form          ui.CustomEndpointForm
 	formActive    bool
+	chat          ui.ChatInput
+	history       []string
+	progress      string
+	chatError     string
+	run           RunFunc
+	runCancel     context.CancelFunc
+	runCh         <-chan orchestration.Event
+	runGen        uint64
+	running       bool
 	perfFocus     int
 	scanning      bool
 	saveGen       uint64
 	saving        bool
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
+type RunFunc func(context.Context, config.Config, string) <-chan orchestration.Event
 
 type DiscoveryMsg struct {
 	Generation uint64
@@ -49,13 +61,18 @@ func NewWithDeps(c config.Config, defaults []topology.Endpoint, discover Discove
 func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover DiscoverFunc, save func(config.Config) error) Model {
 	d := discover
 	w := setup.Start(c, defaults)
-	model := Model{config: c, setup: c.RequiresSetup(), defaults: defaults, discover: d, save: save, workflow: w, screen: w.State, gate: &setup.GenerationGate{}}
+	model := Model{config: c, setup: c.RequiresSetup(), defaults: defaults, discover: d, save: save, workflow: w, screen: w.State, gate: &setup.GenerationGate{}, chat: ui.NewChatInput()}
 	// An incomplete config starts in discovery; show scanning immediately when
 	// an automatic discovery dependency is available (before Init runs).
 	if model.setup && model.screen == setup.StateDiscovery && d != nil {
 		model.scanning = true
 	}
 	return model
+}
+func NewWithServices(c config.Config, defaults []topology.Endpoint, discover DiscoverFunc, save func(config.Config) error, run RunFunc) Model {
+	m := NewWithDepsAndSave(c, defaults, discover, save)
+	m.run = run
+	return m
 }
 func (m Model) RequiresSetup() bool       { return m.setup }
 func (m Model) Workflow() *setup.Workflow { return m.workflow }
@@ -121,12 +138,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.workflow != nil {
 			m.workflow.Err = x.Err
 		}
+	case chatEventMsg:
+		if x.Generation != m.runGen || !m.running {
+			return m, nil
+		}
+		if x.Event.Type == orchestration.EventCompleted {
+			if x.Event.Result == nil {
+				m.chatError = "orchestration completed without a result"
+			} else {
+				m.history = append(m.history, "King: "+x.Event.Result.Content)
+			}
+			m.running = false
+			m.progress = ""
+			m.runCancel = nil
+			return m, m.nextEvent()
+		}
+		if x.Event.Type == orchestration.EventFailed {
+			m.chatError = x.Event.Message
+			if m.chatError == "" && x.Event.Result != nil {
+				m.chatError = x.Event.Result.Error
+			}
+			if m.chatError == "" {
+				m.chatError = "orchestration failed"
+			}
+			m.running = false
+			m.progress = ""
+			m.runCancel = nil
+			return m, m.nextEvent()
+		}
+		switch x.Event.Type {
+		case orchestration.EventStarted:
+			m.progress = "Started…"
+		case orchestration.EventKingThinking:
+			m.progress = "King is thinking…"
+		case orchestration.EventWorkersRunning:
+			m.progress = "Workers running…"
+		case orchestration.EventCouncilReviewing:
+			m.progress = "Council reviewing…"
+		}
+		return m, m.nextEvent()
 	case tea.KeyPressMsg:
 		if m.saving {
 			return m, nil
 		}
 		key := x.String()
 		if key == "ctrl+c" {
+			if m.running && m.runCancel != nil {
+				m.runCancel()
+				m.running = false
+				m.progress = "Cancelled"
+				m.history = append(m.history, "Cancelled")
+			}
 			return m, tea.Quit
 		}
 		if m.formActive {
@@ -153,15 +215,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form, cmd = m.form.Update(msg)
 			return m, cmd
 		}
-		if key == "q" {
+		if m.setup && key == "q" {
 			return m, tea.Quit
 		}
-		if !m.setup && key == "s" {
+		if !m.setup && key == "ctrl+s" {
+			if m.running {
+				return m, nil
+			}
 			m = m.startSetup()
 			return m.beginDiscovery()
 		}
 		if !m.setup {
-			return m, nil
+			if key == "esc" {
+				if m.running && m.runCancel != nil {
+					m.runCancel()
+					m.running = false
+					m.progress = "Cancelled"
+					m.history = append(m.history, "Cancelled")
+				}
+				return m, nil
+			}
+			if key == "ctrl+enter" {
+				if m.running {
+					return m, nil
+				}
+				p := strings.TrimSpace(m.chat.Value())
+				if p == "" {
+					return m, nil
+				}
+				m.history = append(m.history, "You: "+p)
+				m.chat.SetValue("")
+				m.chatError = ""
+				if m.run != nil {
+					ctx, cancel := context.WithCancel(context.Background())
+					m.runCancel = cancel
+					m.running = true
+					m.runGen++
+					m.runCh = m.run(ctx, m.config, p)
+					if m.runCh == nil {
+						m.running = false
+						m.runCancel = nil
+						m.chat.SetValue(p)
+						m.chatError = "orchestration stream unavailable"
+						return m, nil
+					}
+					return m, m.nextEvent()
+				}
+				m.chatError = "orchestration unavailable"
+				m.chat.SetValue(p)
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.chat, cmd = m.chat.Update(msg)
+			return m, cmd
 		}
 		if key == "r" && m.screen == setup.StateDiscovery {
 			return m.beginDiscovery()
@@ -324,5 +430,8 @@ func (m *Model) assignCurrent() {
 }
 
 func (m Model) View() tea.View {
+	if !m.setup {
+		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
+	}
 	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, Role: m.role, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving})
 }

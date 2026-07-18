@@ -8,6 +8,8 @@ import (
 	"github.com/callumny/kingdom/internal/app"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/modelapi"
+	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 )
@@ -22,7 +24,8 @@ func main() {
 		log.Fatal(err)
 	}
 	d := discovery.New(discovery.DefaultOptions())
-	m := app.NewWithDepsAndSave(c, discovery.DefaultEndpoints(), func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
+	client := modelapi.NewClient()
+	m := app.NewWithServices(c, discovery.DefaultEndpoints(), func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
 		return func() tea.Msg {
 			rs, _ := d.Discover(ctx, candidates)
 			out := make([]setup.EndpointResult, len(rs))
@@ -31,7 +34,9 @@ func main() {
 			}
 			return app.DiscoveryMsg{Generation: gen, Results: out}
 		}
-	}, func(next config.Config) error { return config.Save(path, next) })
+	}, func(next config.Config) error { return config.Save(path, next) }, func(ctx context.Context, cfg config.Config, prompt string) <-chan orchestration.Event {
+		return orchestration.NewEngine(cfg, client).Stream(ctx, prompt)
+	})
 	program := tea.NewProgram(m)
 	if _, err := program.Run(); err != nil {
 		log.Fatal(err)
