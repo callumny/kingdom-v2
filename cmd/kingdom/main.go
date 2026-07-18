@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/app"
@@ -11,6 +12,7 @@ import (
 	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
 )
 
@@ -25,6 +27,14 @@ func main() {
 	}
 	d := discovery.New(discovery.DefaultOptions())
 	client := modelapi.NewClient()
+	workspace, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	toolRunner, err := tools.NewRunner(workspace)
+	if err != nil {
+		log.Fatal(err)
+	}
 	m := app.NewWithServices(c, discovery.DefaultEndpoints(), func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
 		return func() tea.Msg {
 			rs, _ := d.Discover(ctx, candidates)
@@ -35,7 +45,7 @@ func main() {
 			return app.DiscoveryMsg{Generation: gen, Results: out}
 		}
 	}, func(next config.Config) error { return config.Save(path, next) }, func(ctx context.Context, cfg config.Config, prompt string) <-chan orchestration.Event {
-		return orchestration.NewEngine(cfg, client).Stream(ctx, prompt)
+		return orchestration.NewEngineWithTools(cfg, client, toolRunner).Stream(ctx, prompt)
 	})
 	program := tea.NewProgram(m)
 	if _, err := program.Run(); err != nil {

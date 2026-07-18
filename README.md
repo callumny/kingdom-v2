@@ -21,3 +21,10 @@ When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+S to
 reopen setup, and Ctrl+C to cancel and quit. Progress and the final King
 response are shown in in-memory chat history.
+
+The King may also request one tool at a time. `list_files`, `read_file`, and literal `search` run
+automatically inside the directory from which Kingdom was launched. `write_file`, exact-match
+`edit_file`, and `run_command` pause for an explicit decision every time: press `y` to approve,
+`n` to deny, or `Esc` to cancel the run. The prompt shows the tool, target or command, risk category,
+and complete JSON arguments before anything with side effects runs. Tool requests and results remain
+in the in-memory chat transcript.

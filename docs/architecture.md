@@ -9,6 +9,8 @@ Kingdom is deliberately small and layered:
 * `internal/discovery` queries Ollama and OpenAI-compatible endpoints and normalizes their models.
 * `internal/modelapi` translates normalized chat messages into provider-specific local HTTP requests.
 * `internal/orchestration` coordinates the bounded King, Worker, and Council request lifecycle.
+* `internal/tools` validates and executes the six permissioned workspace tools behind a typed approval
+  boundary.
 * `internal/setup` owns the pure setup workflow, draft configuration, endpoint merging, and
   stale-discovery generation guard.
 * `internal/ui` renders presentation without owning domain or infrastructure logic.
@@ -26,12 +28,26 @@ in this stage. Endpoints are revalidated as local before every request, response
 redirects are disabled, and the single retry is limited to transient failures with a cancellation-aware
 delay.
 
-The orchestration engine is independent of Bubble Tea. The King can return a final response or a
-small JSON delegation plan. Worker tasks execute concurrently up to the configured limit, Council
-reviews execute in deterministic slots, and the King synthesizes their ordered outcomes. Four King
-calls and 32 tasks per delegation are hard safety limits. The engine publishes bounded lifecycle
-events that the app consumes one at a time, so progress can be rendered without coupling the engine
-to the terminal.
+The orchestration engine is independent of Bubble Tea. The King can return a final response, a small
+JSON delegation plan, or one typed tool call. Worker tasks execute concurrently up to the configured
+limit, Council reviews execute in deterministic slots, and the King synthesizes their ordered
+outcomes. Runs without tools allow four King calls; tool-enabled runs allow eight because a tool call
+and its follow-up consume separate model turns. A delegation remains limited to 32 tasks. Only the
+King can produce an interpreted tool action; Worker and Council output is always treated as text.
+
+Tool execution is dependency-injected into orchestration. Read-only tools run automatically, while
+write, edit, and command operations send a single-use approval request through the event stream and
+wait for the TUI's decision. The app owns no filesystem or process code: it renders the exact request,
+resolves it once, and resumes consuming events. Results—including denials—are bounded and returned to
+the King as structured context. Repeated call IDs are rejected within a run.
+
+The launch directory is the workspace root. File tools reject traversal, absolute paths outside the
+root, and symlink escapes. Reads, searches, directory walks, command duration, and returned model
+context all have fixed limits. Writes use same-directory atomic replacement and mode `0600`; edits
+require exactly one literal match. Commands run from the workspace through `/bin/sh -c` only after
+approval, with a 30-second timeout, bounded combined output, and a small reconstructed environment.
+The shell is deliberately an approval boundary rather than an OS sandbox: approving a command grants
+that command the permissions of the Kingdom process. This is why commands are never auto-approved.
 
 The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears
 old results before a rescan and uses monotonically increasing generations so late responses cannot
@@ -41,7 +57,7 @@ atomic save command starts, keyboard input is temporarily blocked so the UI cann
 filesystem operation already in progress.
 
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
-and topology. The current implementation has configuration, topology contracts, model discovery, and
-the complete TUI setup/assignment flow, local model API adapters, and King-led orchestration with a
-minimal chat screen. The next stage adds permissioned tools. Starting and stopping model-server
+and topology. The current implementation has configuration, topology contracts, model discovery, the
+complete TUI setup/assignment flow, local model API adapters, King-led orchestration, permissioned
+tools, and a minimal chat screen. Skills are the next stage. Starting and stopping model-server
 processes is a future milestone. SQLite is planned for the later persistence stage.

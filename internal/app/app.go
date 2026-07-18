@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,6 +10,7 @@ import (
 	"github.com/callumny/kingdom/internal/discovery"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
 	"github.com/callumny/kingdom/internal/ui"
 )
@@ -36,6 +38,7 @@ type Model struct {
 	runCh         <-chan orchestration.Event
 	runGen        uint64
 	running       bool
+	approval      *orchestration.ApprovalRequest
 	perfFocus     int
 	scanning      bool
 	saveGen       uint64
@@ -151,6 +154,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.running = false
 			m.progress = ""
 			m.runCancel = nil
+			m.approval = nil
 			return m, m.nextEvent()
 		}
 		if x.Event.Type == orchestration.EventFailed {
@@ -164,6 +168,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.running = false
 			m.progress = ""
 			m.runCancel = nil
+			m.approval = nil
 			return m, m.nextEvent()
 		}
 		switch x.Event.Type {
@@ -175,6 +180,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progress = "Workers running…"
 		case orchestration.EventCouncilReviewing:
 			m.progress = "Council reviewing…"
+		case orchestration.EventToolRunning:
+			if x.Event.ToolCall != nil {
+				m.progress = "King requested " + x.Event.ToolCall.Name + "…"
+			}
+		case orchestration.EventToolApproval:
+			if x.Event.Approval == nil {
+				m.chatError = "invalid tool approval request"
+				if m.runCancel != nil {
+					m.runCancel()
+				}
+				m.running = false
+				return m, nil
+			}
+			m.approval = x.Event.Approval
+			approval := x.Event.Approval.Approval()
+			m.history = append(m.history, formatApproval(approval))
+			m.progress = "Approval required: y approve, n deny, Esc cancel"
+			return m, nil
+		case orchestration.EventToolCompleted:
+			if x.Event.ToolResult != nil {
+				m.history = append(m.history, formatToolResult(*x.Event.ToolResult))
+			}
+			m.progress = "King is thinking…"
 		}
 		return m, m.nextEvent()
 	case tea.KeyPressMsg:
@@ -188,8 +216,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.running = false
 				m.progress = "Cancelled"
 				m.history = append(m.history, "Cancelled")
+				m.approval = nil
 			}
 			return m, tea.Quit
+		}
+		if m.approval != nil {
+			switch key {
+			case "y", "n":
+				approved := key == "y"
+				if m.approval.Resolve(approved) {
+					decision := "denied"
+					if approved {
+						decision = "approved"
+					}
+					m.history = append(m.history, "Tool "+decision)
+				}
+				m.approval = nil
+				m.progress = "Running tool…"
+				return m, m.nextEvent()
+			case "esc":
+				if m.runCancel != nil {
+					m.runCancel()
+				}
+				m.running = false
+				m.approval = nil
+				m.progress = "Cancelled"
+				m.history = append(m.history, "Cancelled")
+				return m, nil
+			default:
+				return m, nil
+			}
 		}
 		if m.formActive {
 			if key == "q" {
@@ -232,6 +288,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.running = false
 					m.progress = "Cancelled"
 					m.history = append(m.history, "Cancelled")
+					m.approval = nil
 				}
 				return m, nil
 			}
@@ -365,6 +422,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func formatApproval(approval tools.Approval) string {
+	return fmt.Sprintf("Tool request: %s | target: %s | risk: %s | args: %s", approval.Call.Name, approval.Summary, approval.Risk, string(approval.Call.Arguments))
+}
+
+func formatToolResult(result tools.Result) string {
+	status := result.Output
+	if result.Error != "" {
+		status = "error: " + result.Error
+	}
+	return fmt.Sprintf("Tool result: %s | %s", result.Name, status)
 }
 
 func (m *Model) modelCount() int {
