@@ -10,6 +10,7 @@ import (
 	"github.com/callumny/kingdom/internal/app"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/memory"
 	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
@@ -41,6 +42,15 @@ func main() {
 	if err := skillLibrary.EnsureDir(); err != nil {
 		log.Fatal(err)
 	}
+	memoryStore, err := memory.Open(filepath.Join(filepath.Dir(path), "memory.db"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer memoryStore.Close()
+	sessionID, err := memory.NewSessionID()
+	if err != nil {
+		log.Fatal(err)
+	}
 	services := app.Services{
 		Defaults: discovery.DefaultEndpoints(),
 		Discover: func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
@@ -55,9 +65,10 @@ func main() {
 		},
 		Save: func(next config.Config) error { return config.Save(path, next) },
 		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
-			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active)).Stream(ctx, prompt)
+			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active), orchestration.WithMemory(memoryStore, sessionID, 6)).Stream(ctx, prompt)
 		},
 		Skills: skillLibrary,
+		Memory: memoryStore,
 	}
 	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)

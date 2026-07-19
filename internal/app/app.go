@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/memory"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/skills"
@@ -41,6 +42,7 @@ type Model struct {
 	running       bool
 	approval      *orchestration.ApprovalRequest
 	skills        skillState
+	memory        memoryState
 	perfFocus     int
 	scanning      bool
 	saveGen       uint64
@@ -55,6 +57,7 @@ type Services struct {
 	Save     func(config.Config) error
 	Run      RunFunc
 	Skills   SkillLibrary
+	Memory   MemoryBrowser
 }
 
 type DiscoveryMsg struct {
@@ -86,6 +89,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		save:     services.Save,
 		run:      services.Run,
 		skills:   skillState{library: services.Skills},
+		memory:   memoryState{store: services.Memory},
 		workflow: w,
 		screen:   w.State,
 		gate:     &setup.GenerationGate{},
@@ -162,6 +166,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.workflow != nil {
 			m.workflow.Err = x.Err
 		}
+	case memorySessionsMsg:
+		if !m.memory.open || x.generation != m.memory.generation {
+			return m, nil
+		}
+		m.memory.loading = false
+		m.memory.sessions = append([]memory.Session(nil), x.sessions...)
+		m.memory.err = ""
+		if x.err != nil {
+			m.memory.err = x.err.Error()
+			m.memory.sessions = nil
+			return m, nil
+		}
+		if len(m.memory.sessions) == 0 {
+			m.memory.cursor = 0
+			m.memory.exchanges = nil
+			return m, nil
+		}
+		if m.memory.cursor >= len(m.memory.sessions) {
+			m.memory.cursor = len(m.memory.sessions) - 1
+		}
+		return m, m.loadSelectedMemory()
+	case memoryExchangesMsg:
+		if !m.memory.open || x.generation != m.memory.generation || m.memory.cursor >= len(m.memory.sessions) || m.memory.sessions[m.memory.cursor].ID != x.sessionID {
+			return m, nil
+		}
+		m.memory.loading = false
+		m.memory.err = ""
+		m.memory.exchanges = append([]memory.Exchange(nil), x.exchanges...)
+		if x.err != nil {
+			m.memory.err = x.err.Error()
+			m.memory.exchanges = nil
+		}
+	case memoryDeletedMsg:
+		if !m.memory.open || x.generation != m.memory.generation {
+			return m, nil
+		}
+		m.memory.loading = false
+		if x.err != nil {
+			m.memory.err = x.err.Error()
+			return m, nil
+		}
+		if !x.deleted {
+			m.memory.err = "session no longer exists"
+			return m, nil
+		}
+		return m, m.loadMemorySessions()
 	case chatEventMsg:
 		if x.Generation != m.runGen || !m.running {
 			return m, nil
@@ -224,6 +274,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.history = append(m.history, formatToolResult(*x.Event.ToolResult))
 			}
 			m.progress = "King is thinking…"
+		case orchestration.EventMemoryRecall:
+			m.progress = x.Event.Message
+		case orchestration.EventMemoryWarning:
+			m.history = append(m.history, "Memory warning: "+x.Event.Message)
 		}
 		return m, m.nextEvent()
 	case tea.KeyPressMsg:
@@ -243,6 +297,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.skills.open {
 			return m.handleSkillsKey(key), nil
+		}
+		if m.memory.open {
+			return m.handleMemoryKey(key)
 		}
 		if m.approval != nil {
 			switch key {
@@ -306,6 +363,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.beginDiscovery()
 		}
 		if !m.setup {
+			if key == "ctrl+m" {
+				if !m.running && m.memory.store != nil {
+					return m, m.openMemory()
+				}
+				return m, nil
+			}
 			if key == "ctrl+k" {
 				if !m.running && m.skills.library != nil {
 					m.openSkills()
@@ -530,6 +593,9 @@ func (m *Model) assignCurrent() {
 }
 
 func (m Model) View() tea.View {
+	if m.memory.open {
+		return m.memoryView()
+	}
 	if m.skills.open {
 		return m.skillsView()
 	}

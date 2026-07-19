@@ -18,9 +18,15 @@ endpoint form, `q` is normal text. While the reviewed configuration is being sav
 briefly blocked until the atomic write succeeds or fails.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
-Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+S to
-reopen setup, and Ctrl+C to cancel and quit. Progress and the final King
-response are shown in in-memory chat history.
+Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
+browse memory, Ctrl+S to reopen setup, and Ctrl+C to cancel and quit. Progress
+and the final King response are shown in the current chat history.
+
+Completed exchanges are stored locally in `~/.kingdom/memory.db`. Before each run, the King receives
+up to six recent exchanges as clearly labelled, untrusted historical context. Press `Ctrl+M` while
+idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return to chat. Press `d`
+and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
+reported without discarding an otherwise valid King response.
 
 The King may also request one tool at a time. `list_files`, `read_file`, and literal `search` run
 automatically inside the directory from which Kingdom was launched. `write_file`, exact-match

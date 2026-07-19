@@ -8,6 +8,7 @@ Kingdom is deliberately small and layered:
 * `internal/topology` defines local endpoints and king, council, and worker assignments.
 * `internal/discovery` queries Ollama and OpenAI-compatible endpoints and normalizes their models.
 * `internal/modelapi` translates normalized chat messages into provider-specific local HTTP requests.
+* `internal/memory` owns the versioned SQLite schema and bounded conversation persistence.
 * `internal/orchestration` coordinates the bounded King, Worker, and Council request lifecycle.
 * `internal/tools` validates and executes the six permissioned workspace tools behind a typed approval
   boundary.
@@ -58,6 +59,25 @@ immutable snapshot into each run. Orchestration renders that snapshot only into 
 prompt, so Worker and Council role contracts remain narrow. Skill instructions cannot alter the
 action schema, permission checks, or safety limits.
 
+Memory is a local, single-file SQLite database accessed through `database/sql`. The infrastructure
+package owns schema migration, permissions, queries, and size limits; orchestration depends only on a
+two-method recall/save interface, and the TUI depends on a separate browse/delete interface. This
+keeps SQL out of both the workflow and presentation layers. One session ID is generated per Kingdom
+process. Successful terminal responses are stored as user/King exchange pairs; failed or cancelled
+runs are not stored.
+
+Before a run, the engine loads up to six recent exchanges across sessions in chronological order and
+injects them only into King calls. The block is explicitly labelled untrusted historical data so it
+cannot override system, skill, action-schema, or tool-permission instructions. Retrieval is recency
+based rather than semantic in this version: it is deterministic, dependency-light, and easy to
+explain, with a 24 KiB prompt ceiling. Database failures produce warning events while orchestration
+continues. Store initialization and unsupported schema versions fail at startup because silently
+using an unknown database format would risk corrupting user data.
+
+The Ctrl+M browser loads session summaries and selected exchanges asynchronously. Each request carries
+a monotonically increasing generation, so a late result cannot replace the user's current selection.
+Session deletion cascades to its exchanges and requires an explicit confirmation in the TUI.
+
 The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears
 old results before a rescan and uses monotonically increasing generations so late responses cannot
 replace current state. Role identity is the endpoint ID plus model ID, which distinguishes the same
@@ -68,6 +88,5 @@ filesystem operation already in progress.
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, model discovery, the
 complete TUI setup/assignment flow, local model API adapters, King-led orchestration, permissioned
-tools, Markdown skills, and a minimal chat screen. Persistent memory is the next stage. Starting and
-stopping model-server processes is a future milestone. SQLite is planned for the later persistence
-stage.
+tools, Markdown skills, persistent conversation memory, and a minimal chat screen. Starting and
+stopping model-server processes remains a future milestone.
