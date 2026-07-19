@@ -13,6 +13,7 @@ Kingdom is deliberately small and layered:
   boundary.
 * `internal/setup` owns the pure setup workflow, draft configuration, endpoint merging, and
   stale-discovery generation guard.
+* `internal/skills` parses, discovers, orders, and bounds reusable Markdown instruction packs.
 * `internal/ui` renders presentation without owning domain or infrastructure logic.
 
 Dependencies point inward: the UI receives application state, discovery depends on topology contracts,
@@ -49,6 +50,14 @@ approval, with a 30-second timeout, bounded combined output, and a small reconst
 The shell is deliberately an approval boundary rather than an OS sandbox: approving a command grants
 that command the permissions of the Kingdom process. This is why commands are never auto-approved.
 
+Skills are passive Markdown rather than executable plugins. The library accepts flat Markdown files
+and `<name>/SKILL.md` directories, ignores symlinks, bounds individual files and the combined prompt,
+and loads valid entries even when another file is malformed. User entries override built-ins by name;
+directory skills override flat files deterministically. The TUI owns session activation and passes an
+immutable snapshot into each run. Orchestration renders that snapshot only into the King's system
+prompt, so Worker and Council role contracts remain narrow. Skill instructions cannot alter the
+action schema, permission checks, or safety limits.
+
 The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears
 old results before a rescan and uses monotonically increasing generations so late responses cannot
 replace current state. Role identity is the endpoint ID plus model ID, which distinguishes the same
@@ -59,5 +68,6 @@ filesystem operation already in progress.
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, model discovery, the
 complete TUI setup/assignment flow, local model API adapters, King-led orchestration, permissioned
-tools, and a minimal chat screen. Skills are the next stage. Starting and stopping model-server
-processes is a future milestone. SQLite is planned for the later persistence stage.
+tools, Markdown skills, and a minimal chat screen. Persistent memory is the next stage. Starting and
+stopping model-server processes is a future milestone. SQLite is planned for the later persistence
+stage.

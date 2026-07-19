@@ -28,3 +28,20 @@ automatically inside the directory from which Kingdom was launched. `write_file`
 `n` to deny, or `Esc` to cancel the run. The prompt shows the tool, target or command, risk category,
 and complete JSON arguments before anything with side effects runs. Tool requests and results remain
 in the in-memory chat transcript.
+
+Press `Ctrl+K` while idle to browse skills. Use `j`/`k` or the arrow keys to move, `Enter` to toggle
+a skill for the current session, `r` to reload the library, and `Esc` to return to chat. Kingdom ships
+with a small `careful-coder` example and loads user skills from `~/.kingdom/skills`. A skill may be a
+flat Markdown file or a directory containing `SKILL.md`:
+
+```markdown
+---
+name: concise
+description: Keep answers brief.
+---
+
+Answer in no more than two sentences unless the user asks for detail.
+```
+
+Active skills are bounded instruction text supplied only to the King. They do not execute scripts,
+bypass tool approval, or change persisted model configuration.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/app"
@@ -12,6 +13,7 @@ import (
 	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
 )
@@ -35,18 +37,29 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	m := app.NewWithServices(c, discovery.DefaultEndpoints(), func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
-		return func() tea.Msg {
-			rs, _ := d.Discover(ctx, candidates)
-			out := make([]setup.EndpointResult, len(rs))
-			for i, r := range rs {
-				out[i] = setup.EndpointResult{Endpoint: r.Endpoint, Models: r.Models, Err: r.Err}
+	skillLibrary := skills.NewLibrary(filepath.Join(filepath.Dir(path), "skills"), skills.DefaultBuiltIns())
+	if err := skillLibrary.EnsureDir(); err != nil {
+		log.Fatal(err)
+	}
+	services := app.Services{
+		Defaults: discovery.DefaultEndpoints(),
+		Discover: func(ctx context.Context, gen uint64, candidates []topology.Endpoint) tea.Cmd {
+			return func() tea.Msg {
+				results, _ := d.Discover(ctx, candidates)
+				out := make([]setup.EndpointResult, len(results))
+				for index, result := range results {
+					out[index] = setup.EndpointResult{Endpoint: result.Endpoint, Models: result.Models, Err: result.Err}
+				}
+				return app.DiscoveryMsg{Generation: gen, Results: out}
 			}
-			return app.DiscoveryMsg{Generation: gen, Results: out}
-		}
-	}, func(next config.Config) error { return config.Save(path, next) }, func(ctx context.Context, cfg config.Config, prompt string) <-chan orchestration.Event {
-		return orchestration.NewEngineWithTools(cfg, client, toolRunner).Stream(ctx, prompt)
-	})
+		},
+		Save: func(next config.Config) error { return config.Save(path, next) },
+		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
+			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active)).Stream(ctx, prompt)
+		},
+		Skills: skillLibrary,
+	}
+	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)
 	if _, err := program.Run(); err != nil {
 		log.Fatal(err)

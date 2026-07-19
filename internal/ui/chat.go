@@ -46,7 +46,7 @@ func ChatView(width, height int, history []string, progress, errorText string, i
 	if running {
 		lines = append(lines, "Running…")
 	}
-	lines = append(lines, "", input.View(), "Ctrl+Enter send   Ctrl+S setup   Esc cancel   Ctrl+C quit")
+	lines = append(lines, "", input.View(), "Ctrl+Enter send   Ctrl+K skills   Ctrl+S setup   Esc cancel   Ctrl+C quit")
 	content := strings.Join(lines, "\n")
 	if height > 0 {
 		ls := strings.Split(content, "\n")

@@ -68,7 +68,7 @@ func TestToolActionPausesForApprovalAndReturnsResultToKing(t *testing.T) {
 	}}
 	runner := &recordingToolRunner{}
 	var events []EventType
-	for event := range NewEngineWithTools(cfg(), client, runner).Stream(context.Background(), "create notes") {
+	for event := range NewEngine(cfg(), client, WithTools(runner)).Stream(context.Background(), "create notes") {
 		events = append(events, event.Type)
 		if event.Type == EventToolApproval {
 			if event.Approval == nil || event.Approval.Approval().Call.ID != "call-1" {
@@ -102,7 +102,7 @@ func TestDeniedToolResultReturnsToKingWithoutFailingRun(t *testing.T) {
 		`{"type":"final","content":"understood"}`,
 	}}
 	var final *Result
-	for event := range NewEngineWithTools(cfg(), client, &recordingToolRunner{}).Stream(context.Background(), "p") {
+	for event := range NewEngine(cfg(), client, WithTools(&recordingToolRunner{})).Stream(context.Background(), "p") {
 		if event.Type == EventToolApproval {
 			event.Approval.Resolve(false)
 		}
@@ -125,7 +125,7 @@ func TestDuplicateToolIDExecutesOnlyOnce(t *testing.T) {
 	call := `{"type":"tool","tool":{"id":"same","name":"read_file","arguments":{"path":"x"}}}`
 	client := &messageRecordingClient{responses: []string{call, call, `{"type":"final","content":"done"}`}}
 	runner := &recordingToolRunner{}
-	for range NewEngineWithTools(cfg(), client, runner).Stream(context.Background(), "p") {
+	for range NewEngine(cfg(), client, WithTools(runner)).Stream(context.Background(), "p") {
 	}
 	if runner.count() != 1 {
 		t.Fatalf("duplicate executed: %d", runner.count())
@@ -136,7 +136,7 @@ func TestCancellationWhileApprovalPendingClosesStream(t *testing.T) {
 	client := &messageRecordingClient{responses: []string{`{"type":"tool","tool":{"id":"call-1","name":"write_file","arguments":{"path":"x","content":"x"}}}`}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream := NewEngineWithTools(cfg(), client, &recordingToolRunner{}).Stream(ctx, "p")
+	stream := NewEngine(cfg(), client, WithTools(&recordingToolRunner{})).Stream(ctx, "p")
 	for event := range stream {
 		if event.Type == EventToolApproval {
 			cancel()
@@ -174,7 +174,7 @@ func TestToolIntegrationWritesApprovedFile(t *testing.T) {
 		`{"type":"tool","tool":{"id":"write-1","name":"write_file","arguments":{"path":"notes.txt","content":"hello"}}}`,
 		`{"type":"final","content":"saved"}`,
 	}}
-	for event := range NewEngineWithTools(cfg(), client, runner).Stream(context.Background(), "save a note") {
+	for event := range NewEngine(cfg(), client, WithTools(runner)).Stream(context.Background(), "save a note") {
 		if event.Type == EventToolApproval {
 			event.Approval.Resolve(true)
 		}
@@ -196,7 +196,7 @@ func TestToolOutputIsBoundedBeforeReturningToKing(t *testing.T) {
 	}}
 	runner := &recordingToolRunner{output: strings.Repeat("x", 30*1024)}
 	var completed *tools.Result
-	for event := range NewEngineWithTools(cfg(), client, runner).Stream(context.Background(), "read") {
+	for event := range NewEngine(cfg(), client, WithTools(runner)).Stream(context.Background(), "read") {
 		if event.Type == EventToolCompleted {
 			completed = event.ToolResult
 		}

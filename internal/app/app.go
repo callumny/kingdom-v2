@@ -10,6 +10,7 @@ import (
 	"github.com/callumny/kingdom/internal/discovery"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
 	"github.com/callumny/kingdom/internal/ui"
@@ -39,13 +40,22 @@ type Model struct {
 	runGen        uint64
 	running       bool
 	approval      *orchestration.ApprovalRequest
+	skills        skillState
 	perfFocus     int
 	scanning      bool
 	saveGen       uint64
 	saving        bool
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
-type RunFunc func(context.Context, config.Config, string) <-chan orchestration.Event
+type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
+
+type Services struct {
+	Defaults []topology.Endpoint
+	Discover DiscoverFunc
+	Save     func(config.Config) error
+	Run      RunFunc
+	Skills   SkillLibrary
+}
 
 type DiscoveryMsg struct {
 	Generation uint64
@@ -57,25 +67,36 @@ type SaveMsg struct {
 	Err        error
 }
 
-func New(c config.Config) Model { return NewWithDeps(c, discovery.DefaultEndpoints(), nil) }
+func New(c config.Config) Model {
+	return NewWithServices(c, Services{Defaults: discovery.DefaultEndpoints()})
+}
 func NewWithDeps(c config.Config, defaults []topology.Endpoint, discover DiscoverFunc) Model {
-	return NewWithDepsAndSave(c, defaults, discover, nil)
+	return NewWithServices(c, Services{Defaults: defaults, Discover: discover})
 }
 func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover DiscoverFunc, save func(config.Config) error) Model {
-	d := discover
-	w := setup.Start(c, defaults)
-	model := Model{config: c, setup: c.RequiresSetup(), defaults: defaults, discover: d, save: save, workflow: w, screen: w.State, gate: &setup.GenerationGate{}, chat: ui.NewChatInput()}
+	return NewWithServices(c, Services{Defaults: defaults, Discover: discover, Save: save})
+}
+func NewWithServices(c config.Config, services Services) Model {
+	w := setup.Start(c, services.Defaults)
+	model := Model{
+		config:   c,
+		setup:    c.RequiresSetup(),
+		defaults: services.Defaults,
+		discover: services.Discover,
+		save:     services.Save,
+		run:      services.Run,
+		skills:   skillState{library: services.Skills},
+		workflow: w,
+		screen:   w.State,
+		gate:     &setup.GenerationGate{},
+		chat:     ui.NewChatInput(),
+	}
 	// An incomplete config starts in discovery; show scanning immediately when
 	// an automatic discovery dependency is available (before Init runs).
-	if model.setup && model.screen == setup.StateDiscovery && d != nil {
+	if model.setup && model.screen == setup.StateDiscovery && services.Discover != nil {
 		model.scanning = true
 	}
 	return model
-}
-func NewWithServices(c config.Config, defaults []topology.Endpoint, discover DiscoverFunc, save func(config.Config) error, run RunFunc) Model {
-	m := NewWithDepsAndSave(c, defaults, discover, save)
-	m.run = run
-	return m
 }
 func (m Model) RequiresSetup() bool       { return m.setup }
 func (m Model) Workflow() *setup.Workflow { return m.workflow }
@@ -220,6 +241,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+		if m.skills.open {
+			return m.handleSkillsKey(key), nil
+		}
 		if m.approval != nil {
 			switch key {
 			case "y", "n":
@@ -282,6 +306,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.beginDiscovery()
 		}
 		if !m.setup {
+			if key == "ctrl+k" {
+				if !m.running && m.skills.library != nil {
+					m.openSkills()
+				}
+				return m, nil
+			}
 			if key == "esc" {
 				if m.running && m.runCancel != nil {
 					m.runCancel()
@@ -308,7 +338,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.runCancel = cancel
 					m.running = true
 					m.runGen++
-					m.runCh = m.run(ctx, m.config, p)
+					active := append([]skills.Skill(nil), m.skills.active...)
+					m.runCh = m.run(ctx, m.config, p, active)
 					if m.runCh == nil {
 						m.running = false
 						m.runCancel = nil
@@ -499,6 +530,9 @@ func (m *Model) assignCurrent() {
 }
 
 func (m Model) View() tea.View {
+	if m.skills.open {
+		return m.skillsView()
+	}
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}

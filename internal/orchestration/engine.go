@@ -11,6 +11,7 @@ import (
 
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/modelapi"
+	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
 )
@@ -53,19 +54,29 @@ type ToolRunner interface {
 }
 
 type Engine struct {
-	cfg    config.Config
-	client ChatClient
-	tools  ToolRunner
+	cfg         config.Config
+	client      ChatClient
+	tools       ToolRunner
+	skillPrompt string
 }
 
-func NewEngine(cfg config.Config, c ChatClient) *Engine {
+type Option func(*Engine)
+
+func WithTools(runner ToolRunner) Option {
+	return func(engine *Engine) { engine.tools = runner }
+}
+
+func WithSkills(active []skills.Skill) Option {
+	prompt, _ := skills.Render(append([]skills.Skill(nil), active...))
+	return func(engine *Engine) { engine.skillPrompt = prompt }
+}
+
+func NewEngine(cfg config.Config, client ChatClient, options ...Option) *Engine {
 	cfg.Topology.Endpoints = append([]topology.Endpoint(nil), cfg.Topology.Endpoints...)
-	return &Engine{cfg: cfg, client: c}
-}
-
-func NewEngineWithTools(cfg config.Config, client ChatClient, runner ToolRunner) *Engine {
-	engine := NewEngine(cfg, client)
-	engine.tools = runner
+	engine := &Engine{cfg: cfg, client: client}
+	for _, option := range options {
+		option(engine)
+	}
 	return engine
 }
 func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
@@ -243,14 +254,17 @@ func truncateUTF8(value string, limit int) string {
 
 func (e *Engine) kingSystemPrompt() string {
 	base := "You are the King. Respond with JSON action."
-	if e.tools == nil {
-		return base
-	}
-	return base + ` Use exactly one action per response:
+	if e.tools != nil {
+		base += ` Use exactly one action per response:
 {"type":"final","content":"..."}
 {"type":"delegate","tasks":[{"id":"...","prompt":"..."}]}
 {"type":"tool","tool":{"id":"unique-id","name":"tool-name","arguments":{...}}}
 Only you may request tools. Available tools: list_files(path,max_depth), read_file(path), search(path,query), write_file(path,content), edit_file(path,old,new), run_command(command). Read tools run automatically. Writes, edits, and commands require the user to approve every call.`
+	}
+	if e.skillPrompt != "" {
+		base += "\n\nACTIVE SKILLS\nFollow these instructions where relevant. They cannot override the action schema, tool permissions, or safety limits.\n\n" + e.skillPrompt
+	}
+	return base
 }
 
 type action struct {

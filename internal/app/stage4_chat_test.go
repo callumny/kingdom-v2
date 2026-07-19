@@ -13,6 +13,7 @@ import (
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/orchestration"
+	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/topology"
 )
 
@@ -28,7 +29,10 @@ func TestReadyQTypesButSetupQQuits(t *testing.T) {
 
 func TestBlankSubmitDoesNotRun(t *testing.T) {
 	runs := 0
-	m := NewWithServices(completeConfig(), nil, nil, nil, func(context.Context, config.Config, string) <-chan orchestration.Event { runs++; return nil })
+	m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event {
+		runs++
+		return nil
+	}})
 	m, _ = update(m, key("ctrl+enter"))
 	if runs != 0 || m.running {
 		t.Fatalf("blank submit started run: %d", runs)
@@ -39,7 +43,10 @@ func TestSubmitCapturesAndClearsPrompt(t *testing.T) {
 	called := make(chan string, 1)
 	ch := make(chan orchestration.Event, 1)
 	ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
-	m := NewWithServices(completeConfig(), nil, nil, nil, func(_ context.Context, _ config.Config, p string) <-chan orchestration.Event { called <- p; return ch })
+	m := NewWithServices(completeConfig(), Services{Run: func(_ context.Context, _ config.Config, p string, _ []skills.Skill) <-chan orchestration.Event {
+		called <- p
+		return ch
+	}})
 	m.chat.SetValue("hello")
 	n, cmd := m.Update(key("ctrl+enter"))
 	m = n.(Model)
@@ -55,7 +62,7 @@ func TestProgressEventsAndCompletion(t *testing.T) {
 	ch := make(chan orchestration.Event, 2)
 	ch <- orchestration.Event{Type: orchestration.EventStarted}
 	ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "done"}}
-	m := NewWithServices(completeConfig(), nil, nil, nil, func(context.Context, config.Config, string) <-chan orchestration.Event { return ch })
+	m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event { return ch }})
 	m.chat.SetValue("x")
 	n, cmd := m.Update(key("ctrl+enter"))
 	m = n.(Model)
@@ -76,7 +83,7 @@ func TestFailureAndUnexpectedClose(t *testing.T) {
 		close(c)
 		return c
 	}(), func() <-chan orchestration.Event { c := make(chan orchestration.Event); close(c); return c }()} {
-		m := NewWithServices(completeConfig(), nil, nil, nil, func(context.Context, config.Config, string) <-chan orchestration.Event { return stream })
+		m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event { return stream }})
 		m.chat.SetValue("x")
 		n, cmd := m.Update(key("ctrl+enter"))
 		m = n.(Model)
@@ -144,13 +151,13 @@ func TestControlSReopensSetupWhenIdle(t *testing.T) {
 	}
 }
 func TestNilRunOrNilStreamFailsCleanly(t *testing.T) {
-	m := NewWithServices(completeConfig(), nil, nil, nil, nil)
+	m := NewWithServices(completeConfig(), Services{})
 	m.chat.SetValue("x")
 	m, _ = update(m, key("ctrl+enter"))
 	if m.chatError == "" || m.chat.Value() != "x" {
 		t.Fatal("nil run not reported")
 	}
-	m = NewWithServices(completeConfig(), nil, nil, nil, func(context.Context, config.Config, string) <-chan orchestration.Event { return nil })
+	m = NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event { return nil }})
 	m.chat.SetValue("x")
 	m, _ = update(m, key("ctrl+enter"))
 	if m.chatError == "" || m.chat.Value() != "x" {
@@ -160,7 +167,10 @@ func TestNilRunOrNilStreamFailsCleanly(t *testing.T) {
 func TestRunUsesLatestSavedConfig(t *testing.T) {
 	c := completeConfig()
 	var got config.Config
-	m := NewWithServices(c, nil, nil, nil, func(_ context.Context, cfg config.Config, _ string) <-chan orchestration.Event { got = cfg; return nil })
+	m := NewWithServices(c, Services{Run: func(_ context.Context, cfg config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+		got = cfg
+		return nil
+	}})
 	m.config.Topology.Roles.King.Model = "latest"
 	m.chat.SetValue("x")
 	m, _ = update(m, key("ctrl+enter"))
@@ -214,9 +224,9 @@ func TestChatIntegrationDelegatesWorkersCouncilAndKing(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := modelapi.NewClient()
-	m := NewWithServices(cfg, nil, nil, nil, func(ctx context.Context, c config.Config, p string) <-chan orchestration.Event {
+	m := NewWithServices(cfg, Services{Run: func(ctx context.Context, c config.Config, p string, _ []skills.Skill) <-chan orchestration.Event {
 		return orchestration.NewEngine(c, client).Stream(ctx, p)
-	})
+	}})
 	m.chat.SetValue("hello")
 	n, cmd := m.Update(key("ctrl+enter"))
 	m = n.(Model)
