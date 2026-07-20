@@ -8,6 +8,7 @@ Kingdom is deliberately small and layered:
 * `internal/topology` defines local endpoints and king, council, and worker assignments.
 * `internal/discovery` queries Ollama and OpenAI-compatible endpoints and normalizes their models.
 * `internal/modelapi` translates normalized chat messages into provider-specific local HTTP requests.
+* `internal/localmodels` inspects and starts installed Ollama, LM Studio, and MLX runtimes.
 * `internal/memory` owns the versioned SQLite schema and bounded conversation persistence.
 * `internal/orchestration` coordinates the bounded King, Worker, and Council request lifecycle.
 * `internal/tools` validates and executes the six permissioned workspace tools behind a typed approval
@@ -78,6 +79,26 @@ The Ctrl+M browser loads session summaries and selected exchanges asynchronously
 a monotonically increasing generation, so a late result cannot replace the user's current selection.
 Session deletion cascades to its exchanges and requires an explicit confirmation in the TUI.
 
+Local runtime management extends discovery rather than replacing it. `internal/localmodels` owns a
+provider-neutral manager and three adapters. The adapters use an injected system boundary for
+executable lookup and argument-vector commands, and reuse `internal/discovery` to decide whether each
+loopback endpoint is ready. Inspection runs the three providers concurrently but preserves their
+stable display order. The TUI sees only normalized runtime/model status and calls one confirmed
+start-and-wait operation.
+
+Ollama starts its long-running server and exposes installed models through its local API. LM Studio
+uses non-launching JSON inventory for read-only inspection, then starts the loopback server and loads
+the explicitly selected installed model. MLX scans bounded Hugging Face cache entries for complete
+snapshots and launches only an exact cached repository ID with offline mode and the cache path forced
+into the child environment. Long-running processes receive no terminal input/output, enter a detached
+process session, and intentionally survive Kingdom. All commands bypass a shell, command output is
+bounded, startup is cancellable, and readiness is capped at two minutes.
+
+After readiness, Ctrl+R refreshes normalized status. Entering a loaded model reuses the existing setup
+workflow: Kingdom rescans all endpoints and focuses the exact endpoint/model identity in role
+assignment. No runtime adapter writes topology configuration directly. Downloads, arbitrary model
+paths, remote binds, unloading, and process shutdown are outside this stage.
+
 The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears
 old results before a rescan and uses monotonically increasing generations so late responses cannot
 replace current state. Role identity is the endpoint ID plus model ID, which distinguishes the same
@@ -88,5 +109,5 @@ filesystem operation already in progress.
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, model discovery, the
 complete TUI setup/assignment flow, local model API adapters, King-led orchestration, permissioned
-tools, Markdown skills, persistent conversation memory, and a minimal chat screen. Starting and
-stopping model-server processes remains a future milestone.
+tools, Markdown skills, persistent conversation memory, local model startup, and a minimal chat
+screen. Model downloads and model-server shutdown remain future milestones.

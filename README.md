@@ -28,6 +28,18 @@ idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return
 and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
 reported without discarding an otherwise valid King response.
 
+Press `Ctrl+R` while idle—or from the discovery step—to manage local models. Use `h`/`l` to choose
+Ollama, LM Studio, or MLX and `j`/`k` to choose an installed model. Press `s`, review the action, and
+press `y` to start it (`n` cancels). Kingdom waits for the loopback endpoint to become ready, then
+refreshes its model status. Press `Enter` on a ready model to reopen setup, rescan endpoints, and focus
+that model in role assignment.
+
+This version never downloads models, binds a server beyond loopback, or stops a process. Ollama can be
+started first and then refreshed to expose its installed models. LM Studio models come from
+`lms ls --llm --json --no-launch`; MLX models come only from complete snapshots already in the local
+Hugging Face cache and are started with offline mode enforced. Processes intentionally continue after
+Kingdom exits.
+
 The King may also request one tool at a time. `list_files`, `read_file`, and literal `search` run
 automatically inside the directory from which Kingdom was launched. `write_file`, exact-match
 `edit_file`, and `run_command` pause for an explicit decision every time: press `y` to approve,

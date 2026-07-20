@@ -45,13 +45,16 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			} else {
 				lines = append(lines, "", "Scan complete")
 			}
-			lines = append(lines, "Enter: continue   r: rescan   q: quit")
+			lines = append(lines, "Enter: continue   r: rescan   Ctrl+R: local models   q: quit")
 			for i, r := range wf.Draft.Results {
 				if i >= 200 {
 					lines = append(lines, "...")
 					break
 				}
 				lines = append(lines, r.Endpoint.Name+": "+string(setup.Status(r)))
+			}
+			if wf.Err != nil {
+				lines = append(lines, "Discovery error: "+wf.Err.Error())
 			}
 		case setup.StateRoles:
 			label := map[int]string{0: "King", 1: "Worker", 2: "Council"}[p.Role]

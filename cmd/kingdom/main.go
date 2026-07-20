@@ -10,6 +10,7 @@ import (
 	"github.com/callumny/kingdom/internal/app"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/memory"
 	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/orchestration"
@@ -29,6 +30,11 @@ func main() {
 		log.Fatal(err)
 	}
 	d := discovery.New(discovery.DefaultOptions())
+	mlxCacheRoot, err := localmodels.DefaultMLXCacheRoot()
+	if err != nil {
+		log.Fatal(err)
+	}
+	localModelManager := localmodels.New(localmodels.OSSystem{}, d, mlxCacheRoot)
 	client := modelapi.NewClient()
 	workspace, err := os.Getwd()
 	if err != nil {
@@ -67,8 +73,9 @@ func main() {
 		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
 			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active), orchestration.WithMemory(memoryStore, sessionID, 6)).Stream(ctx, prompt)
 		},
-		Skills: skillLibrary,
-		Memory: memoryStore,
+		Skills:      skillLibrary,
+		Memory:      memoryStore,
+		LocalModels: localModelManager,
 	}
 	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/memory"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
@@ -43,6 +44,7 @@ type Model struct {
 	approval      *orchestration.ApprovalRequest
 	skills        skillState
 	memory        memoryState
+	localModels   localModelState
 	perfFocus     int
 	scanning      bool
 	saveGen       uint64
@@ -52,12 +54,13 @@ type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
 
 type Services struct {
-	Defaults []topology.Endpoint
-	Discover DiscoverFunc
-	Save     func(config.Config) error
-	Run      RunFunc
-	Skills   SkillLibrary
-	Memory   MemoryBrowser
+	Defaults    []topology.Endpoint
+	Discover    DiscoverFunc
+	Save        func(config.Config) error
+	Run         RunFunc
+	Skills      SkillLibrary
+	Memory      MemoryBrowser
+	LocalModels LocalModelManager
 }
 
 type DiscoveryMsg struct {
@@ -82,18 +85,19 @@ func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover 
 func NewWithServices(c config.Config, services Services) Model {
 	w := setup.Start(c, services.Defaults)
 	model := Model{
-		config:   c,
-		setup:    c.RequiresSetup(),
-		defaults: services.Defaults,
-		discover: services.Discover,
-		save:     services.Save,
-		run:      services.Run,
-		skills:   skillState{library: services.Skills},
-		memory:   memoryState{store: services.Memory},
-		workflow: w,
-		screen:   w.State,
-		gate:     &setup.GenerationGate{},
-		chat:     ui.NewChatInput(),
+		config:      c,
+		setup:       c.RequiresSetup(),
+		defaults:    services.Defaults,
+		discover:    services.Discover,
+		save:        services.Save,
+		run:         services.Run,
+		skills:      skillState{library: services.Skills},
+		memory:      memoryState{store: services.Memory},
+		localModels: localModelState{manager: services.LocalModels},
+		workflow:    w,
+		screen:      w.State,
+		gate:        &setup.GenerationGate{},
+		chat:        ui.NewChatInput(),
 	}
 	// An incomplete config starts in discovery; show scanning immediately when
 	// an automatic discovery dependency is available (before Init runs).
@@ -119,6 +123,7 @@ func (m Model) beginDiscovery() (Model, tea.Cmd) {
 	gen, ctx := m.gate.Begin(context.Background())
 	m.scanning = true
 	m.workflow.Draft.Results = nil
+	m.workflow.Err = nil
 	m.modelIndex = 0
 	cands := setup.MergeCandidates(m.defaults, m.workflow.Draft.Config.Topology.Endpoints)
 	return m, m.discover(ctx, gen, cands)
@@ -151,7 +156,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modelIndex = n - 1
 			}
 			m.scanning = false
+			m.focusPreferredModel()
 		}
+	case localModelsMsg:
+		if !m.localModels.open || x.generation != m.localModels.generation {
+			return m, nil
+		}
+		m.localModels.loading = false
+		m.localModels.runtimes = append([]localmodels.Runtime(nil), x.runtimes...)
+		if len(m.localModels.runtimes) == 0 {
+			m.localModels.runtimeCursor = 0
+			m.localModels.modelCursor = 0
+		} else if m.localModels.runtimeCursor >= len(m.localModels.runtimes) {
+			m.localModels.runtimeCursor = len(m.localModels.runtimes) - 1
+			m.localModels.modelCursor = 0
+		}
+	case localModelStartedMsg:
+		if !m.localModels.open || x.generation != m.localModels.generation {
+			return m, nil
+		}
+		m.localModels.starting = false
+		if x.err != nil {
+			m.localModels.err = x.err.Error()
+			return m, nil
+		}
+		return m, m.inspectLocalModels()
 	case SaveMsg:
 		if !m.saving || m.screen != setup.StateReview || x.Generation != m.saveGen {
 			return m, nil
@@ -286,6 +315,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		key := x.String()
 		if key == "ctrl+c" {
+			if m.localModels.cancel != nil {
+				m.localModels.cancel()
+			}
 			if m.running && m.runCancel != nil {
 				m.runCancel()
 				m.running = false
@@ -300,6 +332,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.memory.open {
 			return m.handleMemoryKey(key)
+		}
+		if m.localModels.open {
+			return m.handleLocalModelsKey(key)
 		}
 		if m.approval != nil {
 			switch key {
@@ -354,6 +389,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.setup && key == "q" {
 			return m, tea.Quit
+		}
+		if key == "ctrl+r" && !m.running && m.localModels.manager != nil && (!m.setup || m.screen == setup.StateDiscovery) {
+			return m, m.openLocalModels()
 		}
 		if !m.setup && key == "ctrl+s" {
 			if m.running {
@@ -593,6 +631,9 @@ func (m *Model) assignCurrent() {
 }
 
 func (m Model) View() tea.View {
+	if m.localModels.open {
+		return m.localModelsView()
+	}
 	if m.memory.open {
 		return m.memoryView()
 	}
