@@ -12,14 +12,13 @@ and a contextual footer. Content is capped at a readable width and centred on wi
 The first-run workflow now begins with explicit Welcome and Providers states. Welcome explains that
 models run locally, that up to three may be selected, and that larger models generally trade more RAM
 and latency for capability. Discovery continues in the background but cannot skip the explanation.
-Providers with models are selected by default; Space toggles an available provider, and only selected
-provider results reach subsequent model choices. Provider selection is transient setup state because
-the persisted topology should contain assignments, not abandoned onboarding choices.
+Providers report readiness and every ready provider contributes to the model catalogue. Selection is
+performed once, at model level, so choices can span multiple providers without redundant provider
+checkboxes. Model selection is transient setup state because the persisted topology should contain
+assignments, not abandoned onboarding choices.
 
-The setup progress line reserves Providers, Models, Roles, and Review. This increment implements the
-first two screens' foundation while the existing role screen temporarily performs individual model
-selection. The next increment will insert a dedicated Models state and size-based suggestions without
-changing the provider-selection contract.
+The setup progress line contains Providers, Models, Roles, and Review. The dedicated Models state uses
+the composite endpoint/model identity already required by topology and limits the selection to three.
 
 ## Why this shape
 
@@ -28,10 +27,10 @@ shortcuts, and gave status, navigation, and primary actions equal visual weight.
 express hierarchy without entering application state. A small rendering helper is sufficient; a UI
 component framework would add indirection before Kingdom has repeated components that justify it.
 
-Provider selection remains in the Bubble Tea application because it is cursor and session state. The
-pure setup workflow owns the ordered Welcome and Providers transitions, while discovery and process
-management remain injected asynchronous services. This keeps visual design, interaction state, and
-infrastructure responsibilities separate and explainable.
+The model cursor remains in the Bubble Tea application, while the selected model references live in
+the pure setup draft where limits and rescan reconciliation can be tested without a terminal. Discovery
+and process management remain injected asynchronous services. This keeps visual design, interaction
+state, and infrastructure responsibilities separate and explainable.
 
 ## Verification
 

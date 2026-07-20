@@ -21,12 +21,22 @@ func TestOnboardingStartsAtWelcomeThenProviders(t *testing.T) {
 		t.Fatalf("providers advanced without models: state=%v err=%v", w.State, err)
 	}
 	w.Draft.ApplyResults([]EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0], Models: []discovery.Model{{ID: "model"}}}})
-	if err := w.Continue(); err != nil || w.State != StateRoles {
+	if err := w.Continue(); err != nil || w.State != StateModels {
 		t.Fatalf("providers continue: state=%v err=%v", w.State, err)
+	}
+	if err := w.Draft.ToggleModel(ModelRef{EndpointID: discovery.DefaultEndpoints()[0].ID, ModelID: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Continue(); err != nil || w.State != StateRoles {
+		t.Fatalf("models continue: state=%v err=%v", w.State, err)
+	}
+	w.Back()
+	if w.State != StateModels {
+		t.Fatalf("roles back=%v, want models", w.State)
 	}
 	w.Back()
 	if w.State != StateProviders {
-		t.Fatalf("roles back=%v, want providers", w.State)
+		t.Fatalf("models back=%v, want providers", w.State)
 	}
 	w.Back()
 	if w.State != StateWelcome {

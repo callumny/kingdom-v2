@@ -187,10 +187,6 @@ func (m Model) handleLocalModelsKey(key string) (Model, tea.Cmd) {
 			m = m.startSetup()
 		}
 		m.localModels.open = false
-		if m.providerSelected == nil {
-			m.providerSelected = make(map[string]bool)
-		}
-		m.providerSelected[runtime.Endpoint.ID] = true
 		m.localModels.preferred = &topology.Assignment{EndpointID: runtime.Endpoint.ID, Model: modelID}
 		return m.beginDiscovery()
 	}
@@ -208,15 +204,11 @@ func (m *Model) focusPreferredModel() {
 	if m.localModels.preferred == nil || m.workflow == nil {
 		return
 	}
-	index := 0
-	for _, result := range m.workflow.Draft.Results {
-		for _, model := range result.Models {
-			if result.Endpoint.ID == m.localModels.preferred.EndpointID && model.ID == m.localModels.preferred.Model {
-				m.modelIndex = index
-				m.localModels.preferred = nil
-				return
-			}
-			index++
+	for index, option := range m.workflow.Draft.Catalog() {
+		if option.Ref.EndpointID == m.localModels.preferred.EndpointID && option.Ref.ModelID == m.localModels.preferred.Model {
+			m.modelCursor = index
+			m.localModels.preferred = nil
+			return
 		}
 	}
 	m.localModels.err = fmt.Sprintf("selected model %s was not discovered", m.localModels.preferred.Model)

@@ -9,11 +9,10 @@ import (
 )
 
 type Presentation struct {
-	ModelIndex, Role, ProviderCursor, PerfFocus int
-	Form                                        *CustomEndpointForm
-	PreviousEndpoints                           []topology.Endpoint
-	SelectedProviders                           map[string]bool
-	FormActive, Scanning, Saving                bool
+	ModelIndex, ModelCursor, Role, ProviderCursor, PerfFocus int
+	Form                                                     *CustomEndpointForm
+	PreviousEndpoints                                        []topology.Endpoint
+	FormActive, Scanning, Saving                             bool
 }
 
 // ViewWithPresentation renders the complete presentation before applying the
@@ -43,6 +42,9 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 		case setup.StateProviders:
 			progress = setupProgress(1)
 			body, footer = providersSetupView(wf, p)
+		case setup.StateModels:
+			progress = setupProgress(2)
+			body, footer = modelsSetupView(wf, p)
 		case setup.StateRoles:
 			progress = setupProgress(3)
 			label := map[int]string{0: "King", 1: "Worker", 2: "Council"}[p.Role]
@@ -50,19 +52,12 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 				label = "King"
 			}
 			body = append(body, royalBrand.Render("Assign role: "+label), "", "1: King   2: Worker   3: Council   0: Council uses King")
-			idx := 0
-			for _, r := range wf.Draft.Results {
-				if !providerIsSelected(p.SelectedProviders, r.Endpoint.ID) {
-					continue
+			for index, option := range wf.Draft.SelectedModels() {
+				marker := "  "
+				if index == p.ModelIndex {
+					marker = "> "
 				}
-				for _, m := range r.Models {
-					marker := "  "
-					if idx == p.ModelIndex {
-						marker = "> "
-					}
-					body = append(body, marker+r.Endpoint.Name+" ("+r.Endpoint.ID+") / "+m.ID)
-					idx++
-				}
+				body = append(body, marker+option.Endpoint.Name+" / "+option.Ref.ModelID)
 			}
 			r := wf.Draft.Config.Topology.Roles
 			council := fmt.Sprintf("%s/%s", r.Council.EndpointID, r.Council.Model)

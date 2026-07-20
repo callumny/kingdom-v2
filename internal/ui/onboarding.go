@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/callumny/kingdom/internal/setup"
 )
@@ -29,8 +30,8 @@ func welcomeSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 }
 
 func providersSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
-	body := []string{royalBrand.Render("Choose your model providers"), ""}
-	body = append(body, styledParagraph("Select one or more places where Kingdom should find and run local models.", 88, royalMuted)...)
+	body := []string{royalBrand.Render("Set up model providers"), ""}
+	body = append(body, styledParagraph("Kingdom checks every local provider. Ready providers automatically contribute models to the next step.", 88, royalMuted)...)
 	body = append(body, "")
 	if p.Scanning {
 		body = append(body, royalCyan.Render("Checking local providers…"), "")
@@ -40,11 +41,7 @@ func providersSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		if index == p.ProviderCursor {
 			pointer = royalPointer.Render("› ")
 		}
-		checked := "[ ]"
-		if p.SelectedProviders[result.Endpoint.ID] {
-			checked = "[✓]"
-		}
-		row := pointer + royalText.Render(checked+" "+fmt.Sprintf("%-12s", result.Endpoint.Name)) + "  " + providerStatus(result)
+		row := pointer + royalText.Render(fmt.Sprintf("%-12s", result.Endpoint.Name)) + "  " + providerStatus(result)
 		body = append(body, row)
 		if index == p.ProviderCursor {
 			body = append(body, "    "+royalMuted.Render(providerDescription(result.Endpoint.ID)))
@@ -56,11 +53,61 @@ func providersSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if wf.Err != nil {
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
-	footer := "↑↓ Move   •   Space Toggle   •   Enter Continue   •   m Manage models   •   Esc Back"
+	footer := "↑↓ Inspect   •   Enter View models   •   m Manage providers   •   Esc Back"
 	if p.Scanning {
 		footer = "Checking providers…   •   Esc Back"
 	}
 	return body, royalMuted.Render(footer)
+}
+
+func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
+	selected := wf.Draft.SelectedModels()
+	body := []string{royalBrand.Render("Choose your models"), ""}
+	body = append(body, styledParagraph("Choose up to three models from any provider. A mix of sizes gives Kingdom flexible options for different jobs.", 88, royalMuted)...)
+	body = append(body, "", royalCyan.Render(fmt.Sprintf("%d of %d selected", len(selected), setup.MaxSelectedModels)), "")
+	for index, option := range wf.Draft.Catalog() {
+		pointer := "  "
+		if index == p.ModelCursor {
+			pointer = royalPointer.Render("› ")
+		}
+		checked := "[ ]"
+		if wf.Draft.IsModelSelected(option.Ref) {
+			checked = "[✓]"
+		}
+		label := fmt.Sprintf("%-12s  %-30s", option.Endpoint.Name, option.Ref.ModelID)
+		body = append(body, pointer+royalText.Render(checked+" "+label)+"  "+royalMuted.Render(modelMetadata(option)))
+	}
+	if len(wf.Draft.Catalog()) == 0 && !p.Scanning {
+		body = append(body, royalMuted.Render("No ready models. Press m to start or load one from an installed provider."))
+	}
+	if p.Scanning {
+		body = append(body, royalCyan.Render("Refreshing available models…"))
+	}
+	if wf.Err != nil {
+		body = append(body, "", royalRed.Render(wf.Err.Error()))
+	}
+	footer := "↑↓ Move   •   Space Toggle   •   Enter Assign roles   •   m Manage providers   •   Esc Back"
+	if p.Scanning {
+		footer = "Refreshing models…   •   Esc Back"
+	}
+	return body, royalMuted.Render(footer)
+}
+
+func modelMetadata(option setup.ModelOption) string {
+	parts := make([]string, 0, 3)
+	if option.ParameterSize != "" {
+		parts = append(parts, option.ParameterSize)
+	}
+	if option.SizeBytes > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f GB", float64(option.SizeBytes)/1_000_000_000))
+	}
+	if option.Quantization != "" {
+		parts = append(parts, option.Quantization)
+	}
+	if len(parts) == 0 {
+		return "size unknown"
+	}
+	return strings.Join(parts, " · ")
 }
 
 func providerStatus(result setup.EndpointResult) string {
@@ -88,8 +135,4 @@ func providerDescription(endpointID string) string {
 	default:
 		return "A custom local model provider."
 	}
-}
-
-func providerIsSelected(selected map[string]bool, endpointID string) bool {
-	return selected == nil || selected[endpointID]
 }

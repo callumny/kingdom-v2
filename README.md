@@ -12,10 +12,11 @@ go run ./cmd/kingdom
 ```
 
 On first run, Kingdom explains the local-model setup while scanning in the background. Press `Enter`
-to choose providers, use arrows to move and `Space` to toggle providers that have models available,
-then press `Enter` to continue. Press `m` to inspect or start local model runtimes, `r` to rescan, and
-`a` to add a custom local endpoint. The current role screen then lets you choose models and assign
-them to King, Worker, and Council; a dedicated model-selection step is the next onboarding increment.
+to inspect provider readiness; every ready provider automatically contributes its models. Continue to
+the Models screen, then use arrows and `Space` to select up to three models from any combination of
+Ollama, LM Studio, MLX, or custom local endpoints. Press `m` to inspect or start local model runtimes,
+`r` to rescan, and `a` to add a custom local endpoint. The role screen assigns only the selected models
+to King, Worker, and Council.
 Press `q` on ordinary setup screens or `Ctrl+C` to exit; inside the custom endpoint form, `q` is normal
 text. While the reviewed configuration is being saved, keyboard input is briefly blocked until the
 atomic write succeeds or fails.

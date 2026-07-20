@@ -105,12 +105,14 @@ focused on the exact endpoint/model identity. No runtime adapter writes topology
 directly. Downloads, arbitrary model
 paths, remote binds, unloading, and process shutdown are outside this stage.
 
-The setup path starts with welcome -> providers -> role assignment -> performance -> review -> ready;
-a separate model-selection state will be inserted between providers and roles in the next onboarding
-increment. Discovery runs behind Welcome so it does not skip the explanation screen. Available
-providers are selected by default, and the user's transient provider choices filter downstream model
-choices without becoming persisted topology. Discovery clears old results before a rescan and uses
-monotonically increasing generations so late responses cannot replace current state. Role identity is
+The setup path is welcome -> providers -> models -> role assignment -> performance -> review -> ready.
+Discovery runs behind Welcome so it does not skip the explanation screen. Providers represent runtime
+readiness rather than a second layer of selection: every ready provider contributes to one flattened
+model catalogue. A model is identified by its endpoint ID plus model ID, so the user can select up to
+three choices across different providers without collisions. This selection is transient; persisted
+topology still contains only role assignments and their referenced endpoints. Discovery clears old
+results before a rescan, reconciles choices that disappeared, and uses monotonically increasing
+generations so late responses cannot replace current state. Role identity is
 the endpoint ID plus model ID, which distinguishes the same model name served by different local
 runtimes. Configuration is not written until review. Once the atomic save command starts, keyboard
 input is temporarily blocked so the UI cannot claim to cancel a filesystem operation already in

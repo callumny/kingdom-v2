@@ -104,8 +104,7 @@ func TestNoModelsBlocksContinue(t *testing.T) {
 func TestPartialDiscoveryStillAllowsAssignment(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e", Name: "E"}, Models: []discovery.Model{{ID: "m"}}}, {Endpoint: topology.Endpoint{ID: "bad"}, Err: errors.New("down")}})
-	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("enter"))
+	m = enterRolesWithModels(t, m, setup.ModelRef{EndpointID: "e", ModelID: "m"})
 	if m.screen != setup.StateRoles {
 		t.Fatal("did not enter roles")
 	}
@@ -114,12 +113,13 @@ func TestPartialDiscoveryStillAllowsAssignment(t *testing.T) {
 func TestRoleSelectionDistinguishesEndpoint(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "one"}, Models: []discovery.Model{{ID: "m"}}}, {Endpoint: topology.Endpoint{ID: "two"}, Models: []discovery.Model{{ID: "m"}}}})
-	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("enter"))
+	m = enterRolesWithModels(t, m,
+		setup.ModelRef{EndpointID: "one", ModelID: "m"},
+		setup.ModelRef{EndpointID: "two", ModelID: "m"},
+	)
 	m, _ = update(m, key("down"))
 	m, _ = update(m, key("2"))
 	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("enter")) // performance -> review
 	if got := m.workflow.Draft.Config.Topology.Roles.Worker.EndpointID; got != "two" {
 		t.Fatalf("worker endpoint=%q", got)
 	}
@@ -128,8 +128,10 @@ func TestRoleSelectionDistinguishesEndpoint(t *testing.T) {
 func TestAssignmentNavigation(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "one"}, Models: []discovery.Model{{ID: "a"}, {ID: "b"}}}})
-	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("enter"))
+	m = enterRolesWithModels(t, m,
+		setup.ModelRef{EndpointID: "one", ModelID: "a"},
+		setup.ModelRef{EndpointID: "one", ModelID: "b"},
+	)
 	m, _ = update(m, key("down"))
 	m, _ = update(m, key("1"))
 	m, _ = update(m, key("enter"))
@@ -177,6 +179,8 @@ func TestRescanCannotContinueWithStaleResults(t *testing.T) {
 	}
 	m, _ = update(m, DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "new"}, Models: []discovery.Model{{ID: "m"}}}}})
 	m, _ = update(m, key("enter"))
+	m, _ = update(m, key(" "))
+	m, _ = update(m, key("enter"))
 	if m.screen != setup.StateRoles {
 		t.Fatal("did not advance after current result")
 	}
@@ -204,11 +208,23 @@ func TestSaveFailureStaysReview(t *testing.T) {
 
 func update(m Model, msg tea.Msg) (Model, tea.Cmd) { n, c := m.Update(msg); return n.(Model), c }
 
+func enterRolesWithModels(t *testing.T, m Model, refs ...setup.ModelRef) Model {
+	t.Helper()
+	m, _ = update(m, key("enter")) // welcome -> providers
+	m, _ = update(m, key("enter")) // providers -> models
+	for _, ref := range refs {
+		if err := m.workflow.Draft.ToggleModel(ref); err != nil {
+			t.Fatalf("select %+v: %v", ref, err)
+		}
+	}
+	m, _ = update(m, key("enter")) // models -> roles
+	return m
+}
+
 func TestSaveSuccessBecomesReady(t *testing.T) {
 	m := NewWithDepsAndSave(config.Default(), nil, nil, func(config.Config) error { return nil })
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e"}, Models: []discovery.Model{{ID: "m"}}}})
-	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("enter"))
+	m = enterRolesWithModels(t, m, setup.ModelRef{EndpointID: "e", ModelID: "m"})
 	m, _ = update(m, key("1"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("2"))
@@ -257,6 +273,8 @@ func TestRolesAssignWithoutAutoAdvanceAndExplicitNext(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.screen, m.workflow.State = setup.StateRoles, setup.StateRoles
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e"}, Models: []discovery.Model{{ID: "m"}, {ID: "n"}}}})
+	_ = m.workflow.Draft.ToggleModel(setup.ModelRef{EndpointID: "e", ModelID: "m"})
+	_ = m.workflow.Draft.ToggleModel(setup.ModelRef{EndpointID: "e", ModelID: "n"})
 	m, _ = update(m, key("1"))
 	m, _ = update(m, key("enter"))
 	if m.screen != setup.StateRoles || !m.workflow.Draft.Config.Topology.Roles.King.Complete() {
@@ -302,6 +320,7 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 	m, _ = update(m, msg)
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
+	m, _ = update(m, key("enter"))
 	if m.screen != setup.StateRoles || m.workflow.State != setup.StateRoles {
 		t.Fatalf("discovery enter advanced to %v/%v, want roles", m.screen, m.workflow.State)
 	}
@@ -329,7 +348,7 @@ func TestInitialAutomaticDiscoveryShowsScanning(t *testing.T) {
 }
 
 func TestControlCQuitsEveryScreen(t *testing.T) {
-	for _, screen := range []setup.WorkflowState{setup.StateWelcome, setup.StateProviders, setup.StateRoles, setup.StateReview, setup.StateReady} {
+	for _, screen := range []setup.WorkflowState{setup.StateWelcome, setup.StateProviders, setup.StateModels, setup.StateRoles, setup.StateReview, setup.StateReady} {
 		m := New(completeConfig())
 		m.setup = screen != setup.StateReady
 		m.screen = screen
@@ -498,6 +517,7 @@ func TestRolesViewShowsSelectionAndAssignments(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.screen, m.workflow.State = setup.StateRoles, setup.StateRoles
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e", Name: "Endpoint"}, Models: []discovery.Model{{ID: "m"}}}})
+	_ = m.workflow.Draft.ToggleModel(setup.ModelRef{EndpointID: "e", ModelID: "m"})
 	if !strings.Contains(m.View().Content, "Endpoint") {
 		t.Fatal("role endpoint missing")
 	}
@@ -555,6 +575,10 @@ func TestSetupIntegrationDiscoversAssignsSavesReloads(t *testing.T) {
 		t.Fatal("discovery failed")
 	}
 	m, _ = update(m, key("enter"))
+	m, _ = update(m, key("enter"))
+	m, _ = update(m, key(" "))
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("1"))
 	m, _ = update(m, key("enter"))

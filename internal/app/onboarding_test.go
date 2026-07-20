@@ -34,28 +34,27 @@ func TestWelcomeScansThenOpensProviders(t *testing.T) {
 	if m.screen != setup.StateProviders {
 		t.Fatalf("enter opened %v, want providers", m.screen)
 	}
-	for _, want := range []string{"Choose your model providers", "Ollama", "LM Studio", "2 models"} {
+	for _, want := range []string{"Set up model providers", "Ollama", "LM Studio", "2 models"} {
 		if !strings.Contains(m.View().Content, want) {
 			t.Fatalf("provider screen missing %q: %s", want, m.View().Content)
 		}
 	}
 }
 
-func TestProviderSelectionFiltersModelsForNextStep(t *testing.T) {
+func TestProvidersLeadToCombinedModelCatalog(t *testing.T) {
 	discover := func(_ context.Context, generation uint64, _ []topology.Endpoint) tea.Cmd {
 		return func() tea.Msg { return DiscoveryMsg{Generation: generation, Results: onboardingResults()} }
 	}
 	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), Discover: discover})
 	m, _ = update(m, m.Init()())
 	m, _ = update(m, key("enter"))
-	m, _ = update(m, key(" ")) // deselect Ollama
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateRoles {
+	if m.screen != setup.StateModels {
 		t.Fatalf("provider continue opened %v", m.screen)
 	}
 	view := m.View().Content
-	if strings.Contains(view, "ollama-model") || !strings.Contains(view, "lm-model") {
-		t.Fatalf("provider selection was not applied to roles: %s", view)
+	if !strings.Contains(view, "ollama-model") || !strings.Contains(view, "lm-model-a") {
+		t.Fatalf("combined model catalogue missing providers: %s", view)
 	}
 }
 

@@ -139,7 +139,7 @@ func TestLocalModelNavigationLoadsSelectedLMStudioModel(t *testing.T) {
 	}
 }
 
-func TestReadyModelContinuesIntoDiscoveryAndFocusesRoleSelection(t *testing.T) {
+func TestReadyModelReturnsToSetupAndFocusesModelSelection(t *testing.T) {
 	manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
 	var generation uint64
 	discover := func(_ context.Context, gen uint64, _ []topology.Endpoint) tea.Cmd {
@@ -160,8 +160,8 @@ func TestReadyModelContinuesIntoDiscoveryAndFocusesRoleSelection(t *testing.T) {
 		t.Fatalf("did not enter setup discovery: setup=%v screen=%v", m.setup, m.screen)
 	}
 	m, _ = update(m, command())
-	if m.screen != setup.StateRoles || m.modelIndex != 1 {
-		t.Fatalf("ready model did not go directly to focused role assignment: screen=%v index=%d", m.screen, m.modelIndex)
+	if m.screen != setup.StateWelcome || m.modelCursor != 1 {
+		t.Fatalf("ready model did not preserve setup or focus: screen=%v cursor=%d", m.screen, m.modelCursor)
 	}
 }
 

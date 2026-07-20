@@ -31,31 +31,24 @@ func TestWelcomeExplainsLocalModelsAndTradeoffs(t *testing.T) {
 	assertViewFits(t, view, 100, 32)
 }
 
-func TestProviderViewHasProgressSelectionAndContextualHelp(t *testing.T) {
+func TestProviderViewHasProgressStatusAndContextualHelp(t *testing.T) {
 	endpoints := discovery.DefaultEndpoints()
 	w := &setup.Workflow{State: setup.StateProviders, Draft: setup.NewDraft(config.Default(), endpoints)}
 	w.Draft.ApplyResults([]setup.EndpointResult{
 		{Endpoint: endpoints[0], Models: []discovery.Model{{ID: "one"}, {ID: "two"}}},
 		{Endpoint: endpoints[1], Err: errInvalidForTest{}},
 	})
-	view := ViewWithPresentation(100, 32, true, w, Presentation{
-		ProviderCursor: 1,
-		SelectedProviders: map[string]bool{
-			endpoints[0].ID: true,
-		},
-	}).Content
+	view := ViewWithPresentation(100, 32, true, w, Presentation{ProviderCursor: 1}).Content
 	for _, want := range []string{
 		"1 Providers",
 		"2 Models",
-		"Choose your model providers",
-		"[✓]",
+		"Set up model providers",
 		"Ollama",
 		"2 models",
-		"[ ]",
 		"LM Studio",
 		"Unavailable",
-		"Space Toggle",
-		"Enter Continue",
+		"Enter View models",
+		"Manage providers",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("providers missing %q: %s", want, view)
@@ -169,8 +162,11 @@ func TestPresentationRendererStates(t *testing.T) {
 	roles := *w
 	roles.State = setup.StateRoles
 	roles.Draft.CouncilUseKing = true
+	if err := roles.Draft.ToggleModel(setup.ModelRef{EndpointID: "e1", ModelID: "m1"}); err != nil {
+		t.Fatal(err)
+	}
 	s := ViewWithPresentation(80, 40, true, &roles, Presentation{ModelIndex: 0, Role: 1}).Content
-	for _, want := range []string{"Worker", "> ep (e1) / m1", "Council: uses King"} {
+	for _, want := range []string{"Worker", "> ep / m1", "Council: uses King"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
@@ -202,7 +198,7 @@ func TestProviderViewGuidesUnavailableModelSetup(t *testing.T) {
 		Err:      errInvalidForTest{},
 	}}}}
 	view := ViewWithPresentation(100, 40, true, w, Presentation{}).Content
-	for _, want := range []string{"Choose your model providers", "m Manage models", "Unavailable"} {
+	for _, want := range []string{"Set up model providers", "m Manage providers", "Unavailable"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("discovery guidance missing %q: %s", want, view)
 		}

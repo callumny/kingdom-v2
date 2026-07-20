@@ -93,6 +93,7 @@ type Draft struct {
 	Config         config.Config
 	Results        []EndpointResult
 	CouncilUseKing bool
+	selectedModels []ModelRef
 }
 
 func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
@@ -104,7 +105,25 @@ func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
 	if c.WorkerConcurrency < 1 {
 		c.WorkerConcurrency = 4
 	}
-	return Draft{Config: c, CouncilUseKing: existing.Topology.Roles.Council.Empty()}
+	return Draft{
+		Config:         c,
+		CouncilUseKing: existing.Topology.Roles.Council.Empty(),
+		selectedModels: selectedRoleModels(existing.Topology.Roles),
+	}
+}
+
+func selectedRoleModels(roles topology.Roles) []ModelRef {
+	selected := make([]ModelRef, 0, MaxSelectedModels)
+	seen := make(map[ModelRef]bool)
+	for _, assignment := range []topology.Assignment{roles.King, roles.Worker, roles.Council} {
+		ref := ModelRef{EndpointID: assignment.EndpointID, ModelID: strings.TrimSpace(assignment.Model)}
+		if !assignment.Complete() || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		selected = append(selected, ref)
+	}
+	return selected
 }
 func (d Draft) HasModels() bool {
 	for _, r := range d.Results {
@@ -150,6 +169,7 @@ type WorkflowState int
 const (
 	StateWelcome WorkflowState = iota
 	StateProviders
+	StateModels
 	StateRoles
 	StatePerformance
 	StateReview
@@ -175,8 +195,13 @@ func (w *Workflow) Continue() error {
 	case StateWelcome:
 		w.State = StateProviders
 	case StateProviders:
-		if !w.Draft.HasModels() {
+		if len(w.Draft.Catalog()) == 0 {
 			return fmt.Errorf("at least one model is required")
+		}
+		w.State = StateModels
+	case StateModels:
+		if len(w.Draft.SelectedModels()) == 0 {
+			return fmt.Errorf("select at least one model")
 		}
 		w.State = StateRoles
 	case StateRoles:
@@ -195,6 +220,8 @@ func (w *Workflow) Back() {
 	} else if w.State == StatePerformance {
 		w.State = StateRoles
 	} else if w.State == StateRoles {
+		w.State = StateModels
+	} else if w.State == StateModels {
 		w.State = StateProviders
 	} else if w.State == StateProviders {
 		w.State = StateWelcome
