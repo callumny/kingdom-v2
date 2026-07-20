@@ -5,7 +5,7 @@ Status: accepted
 ## Decision
 
 Kingdom stores completed user/King exchanges in one local SQLite database at
-`~/.kingdom/memory.db`. The database contains versioned `sessions` and `exchanges` tables, with a
+`~/.kingdom/v2/memory.db`. The database contains versioned `sessions` and `exchanges` tables, with a
 foreign key that cascades session deletion. A cryptographically random opaque session ID is created
 for each application process. The database file is mode `0600`, newly created parent directories are
 mode `0700`, and an unsupported schema version stops startup rather than attempting an unsafe change.

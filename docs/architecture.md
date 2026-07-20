@@ -18,6 +18,9 @@ Kingdom is deliberately small and layered:
 * `internal/skills` parses, discovers, orders, and bounds reusable Markdown instruction packs.
 * `internal/ui` renders presentation without owning domain or infrastructure logic.
 
+Version 2 keeps its configuration, skills, and memory under `~/.kingdom/v2`. This prevents the strict
+v2 configuration loader from reading or overwriting files created by the original Kingdom CLI.
+
 Dependencies point inward: the UI receives application state, discovery depends on topology contracts,
 and the composition root connects them. Provider-specific HTTP payloads do not escape the discovery
 package; callers receive one normalized model type and ordered endpoint results. The setup package

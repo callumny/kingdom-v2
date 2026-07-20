@@ -5,7 +5,7 @@ Status: accepted
 ## Decision
 
 Skills are passive Markdown instruction packs. Kingdom provides a small built-in skill and loads user
-skills from `~/.kingdom/skills` as either flat `.md`/`.markdown` files or directories containing a
+skills from `~/.kingdom/v2/skills` as either flat `.md`/`.markdown` files or directories containing a
 `SKILL.md`. Optional frontmatter contains `name` and `description`; the Markdown body is the instruction
 text. Skills do not bundle or execute scripts in this stage.
 

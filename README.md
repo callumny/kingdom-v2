@@ -22,7 +22,7 @@ Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
 browse memory, Ctrl+S to reopen setup, and Ctrl+C to cancel and quit. Progress
 and the final King response are shown in the current chat history.
 
-Completed exchanges are stored locally in `~/.kingdom/memory.db`. Before each run, the King receives
+Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Before each run, the King receives
 up to six recent exchanges as clearly labelled, untrusted historical context. Press `Ctrl+M` while
 idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return to chat. Press `d`
 and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
@@ -49,7 +49,7 @@ in the in-memory chat transcript.
 
 Press `Ctrl+K` while idle to browse skills. Use `j`/`k` or the arrow keys to move, `Enter` to toggle
 a skill for the current session, `r` to reload the library, and `Esc` to return to chat. Kingdom ships
-with a small `careful-coder` example and loads user skills from `~/.kingdom/skills`. A skill may be a
+with a small `careful-coder` example and loads user skills from `~/.kingdom/v2/skills`. A skill may be a
 flat Markdown file or a directory containing `SKILL.md`:
 
 ```markdown

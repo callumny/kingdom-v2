@@ -8,4 +8,8 @@ The application composition root loads configuration and injects the resulting v
 
 Config files use strict JSON and atomic replacement (same-directory temporary file, sync, close, rename) with restrictive permissions. Validation occurs before any write, preserving a previously valid file when a save is rejected. Missing files return the in-memory defaults; malformed files return actionable errors and are never rewritten.
 
+Version 2 stores its state under `~/.kingdom/v2`, separate from the original CLI's incompatible
+`~/.kingdom/config.json`. Isolation preserves the original data and avoids hiding schema mistakes
+behind permissive legacy parsing.
+
 Newly created configuration directories are mode `0700` and files are mode `0600`; existing directories are not chmodded. Same-directory rename is atomic on POSIX filesystems. Platforms that do not permit replacing an existing destination with rename may return an error; the prior file is preserved and no post-rename chmod is attempted.

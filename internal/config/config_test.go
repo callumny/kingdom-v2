@@ -70,7 +70,7 @@ func TestDefaultPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := DefaultPath()
-	if err != nil || p != filepath.Join(home, ".kingdom", "config.json") {
+	if err != nil || p != filepath.Join(home, ".kingdom", "v2", "config.json") {
 		t.Fatalf("path %q %v", p, err)
 	}
 }
