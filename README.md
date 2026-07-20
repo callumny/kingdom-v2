@@ -11,12 +11,14 @@ make check
 go run ./cmd/kingdom
 ```
 
-On first run, Kingdom opens setup and scans the default local endpoints. If no model is ready, press
-`Enter` or `m` to open local model setup. Otherwise, `Enter` continues directly to role assignment.
-Use arrows or `j`/`k` to navigate, `Enter` to assign, `n` to continue from role assignment, `r` to
-rescan, and `a` to add a custom local endpoint. Press `q` on ordinary setup screens or `Ctrl+C` to
-exit; inside the custom endpoint form, `q` is normal text. While the reviewed configuration is being
-saved, keyboard input is briefly blocked until the atomic write succeeds or fails.
+On first run, Kingdom explains the local-model setup while scanning in the background. Press `Enter`
+to choose providers, use arrows to move and `Space` to toggle providers that have models available,
+then press `Enter` to continue. Press `m` to inspect or start local model runtimes, `r` to rescan, and
+`a` to add a custom local endpoint. The current role screen then lets you choose models and assign
+them to King, Worker, and Council; a dedicated model-selection step is the next onboarding increment.
+Press `q` on ordinary setup screens or `Ctrl+C` to exit; inside the custom endpoint form, `q` is normal
+text. While the reviewed configuration is being saved, keyboard input is briefly blocked until the
+atomic write succeeds or fails.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to

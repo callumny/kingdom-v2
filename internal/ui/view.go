@@ -2,81 +2,65 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 )
 
-var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-
 type Presentation struct {
-	ModelIndex, Role, PerfFocus  int
-	Form                         *CustomEndpointForm
-	PreviousEndpoints            []topology.Endpoint
-	FormActive, Scanning, Saving bool
+	ModelIndex, Role, ProviderCursor, PerfFocus int
+	Form                                        *CustomEndpointForm
+	PreviousEndpoints                           []topology.Endpoint
+	SelectedProviders                           map[string]bool
+	FormActive, Scanning, Saving                bool
 }
 
 // ViewWithPresentation renders the complete presentation before applying the
 // terminal height limit.
 func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workflow, p Presentation) tea.View {
-	lines := []string{"Kingdom"}
+	var body []string
+	progress := ""
+	footer := royalMuted.Render("q Quit")
 	if !setupRequired || (wf != nil && wf.State == setup.StateReady) {
-		lines = append(lines, "", "Configuration ready.", "", "Press s to reopen setup, q to quit.")
+		body = []string{royalBrand.Render("Configuration ready"), "", royalText.Render("Kingdom is ready to use your local models.")}
+		footer = royalMuted.Render("s Reopen setup   •   q Quit")
 	} else {
-		lines = append(lines, "", "Setup required.")
 		if wf == nil {
-			lines = append(lines, "", "Performance (j/k select, h/l adjust, Enter continue):")
+			body = append(body, royalBrand.Render("Setup required"), "", "Performance")
 			first, second := "> ", "  "
 			if p.PerfFocus == 1 {
 				first, second = "  ", "> "
 			}
-			lines = append(lines, first+"Council size", second+"Worker concurrency")
+			body = append(body, first+"Council size", second+"Worker concurrency")
 		}
 		if wf == nil {
-			goto done
+			return tea.NewView(renderRoyalShell(width, height, progress, body, footer))
 		}
 		switch wf.State {
-		case setup.StateDiscovery:
-			if p.Scanning {
-				lines = append(lines, "", "Scanning...")
-			} else {
-				lines = append(lines, "", "Scan complete")
-				if wf.Draft.HasModels() {
-					lines = append(lines, "Enter: assign roles   m: models   r: rescan   a: endpoint   q: quit")
-				} else {
-					lines = append(lines, "Enter: set up a model   m: models   r: rescan   a: endpoint   q: quit")
-				}
-			}
-			for i, r := range wf.Draft.Results {
-				if i >= 200 {
-					lines = append(lines, "...")
-					break
-				}
-				lines = append(lines, r.Endpoint.Name+": "+string(setup.Status(r)))
-			}
-			if !p.Scanning && !wf.Draft.HasModels() {
-				lines = append(lines, "No models discovered. Press Enter or m to set one up.")
-			}
-			if wf.Err != nil {
-				lines = append(lines, "Discovery error: "+wf.Err.Error())
-			}
+		case setup.StateWelcome:
+			body, footer = welcomeSetupView(wf, p)
+		case setup.StateProviders:
+			progress = setupProgress(1)
+			body, footer = providersSetupView(wf, p)
 		case setup.StateRoles:
+			progress = setupProgress(3)
 			label := map[int]string{0: "King", 1: "Worker", 2: "Council"}[p.Role]
 			if label == "" {
 				label = "King"
 			}
-			lines = append(lines, "", "Assign role: "+label, "1: King   2: Worker   3: Council   0: Council uses King")
+			body = append(body, royalBrand.Render("Assign role: "+label), "", "1: King   2: Worker   3: Council   0: Council uses King")
 			idx := 0
 			for _, r := range wf.Draft.Results {
+				if !providerIsSelected(p.SelectedProviders, r.Endpoint.ID) {
+					continue
+				}
 				for _, m := range r.Models {
 					marker := "  "
 					if idx == p.ModelIndex {
 						marker = "> "
 					}
-					lines = append(lines, marker+r.Endpoint.Name+" ("+r.Endpoint.ID+") / "+m.ID)
+					body = append(body, marker+r.Endpoint.Name+" ("+r.Endpoint.ID+") / "+m.ID)
 					idx++
 				}
 			}
@@ -85,22 +69,26 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			if wf.Draft.CouncilUseKing {
 				council = "uses King"
 			}
-			lines = append(lines, fmt.Sprintf("King: %s/%s  Worker: %s/%s  Council: %s", r.King.EndpointID, r.King.Model, r.Worker.EndpointID, r.Worker.Model, council), "Arrows: select   Enter: assign   n: next   Esc: back")
+			body = append(body, "", fmt.Sprintf("King: %s/%s  Worker: %s/%s  Council: %s", r.King.EndpointID, r.King.Model, r.Worker.EndpointID, r.Worker.Model, council))
+			footer = royalMuted.Render("↑↓ Move   •   Enter Assign   •   n Continue   •   Esc Back")
 		case setup.StatePerformance:
-			lines = append(lines, "", "Performance (j/k select, h/l adjust, Enter continue):")
+			progress = setupProgress(4)
+			body = append(body, royalBrand.Render("Advanced performance"), "", "Tune for your hardware.")
 			first, second := "> ", "  "
 			if p.PerfFocus == 1 {
 				first, second = "  ", "> "
 			}
-			lines = append(lines, fmt.Sprintf("%sCouncil size: %d", first, wf.Draft.Config.CouncilSize), fmt.Sprintf("%sWorker concurrency: %d", second, wf.Draft.Config.WorkerConcurrency))
+			body = append(body, "", fmt.Sprintf("%sCouncil size: %d", first, wf.Draft.Config.CouncilSize), fmt.Sprintf("%sWorker concurrency: %d", second, wf.Draft.Config.WorkerConcurrency))
+			footer = royalMuted.Render("↑↓ Move   •   ←→ Adjust   •   Enter Continue   •   Esc Back")
 		case setup.StateReview:
-			lines = append(lines, "", "Review assignments.")
+			progress = setupProgress(4)
+			body = append(body, royalBrand.Render("Review your setup"), "")
 			r := wf.Draft.Config.Topology.Roles
 			council := fmt.Sprintf("%s/%s", r.Council.EndpointID, r.Council.Model)
 			if wf.Draft.CouncilUseKing {
 				council = "uses King"
 			}
-			lines = append(lines,
+			body = append(body,
 				fmt.Sprintf("King: %s/%s", r.King.EndpointID, r.King.Model),
 				fmt.Sprintf("Worker: %s/%s", r.Worker.EndpointID, r.Worker.Model),
 				"Council: "+council,
@@ -108,33 +96,22 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 				fmt.Sprintf("Worker concurrency: %d", wf.Draft.Config.WorkerConcurrency),
 			)
 			for _, e := range wf.Draft.PersistenceEndpoints(p.PreviousEndpoints) {
-				lines = append(lines, fmt.Sprintf("Endpoint: %s (%s)", e.Name, e.BaseURL))
+				body = append(body, fmt.Sprintf("Endpoint: %s (%s)", e.Name, e.BaseURL))
 			}
 			if p.Saving {
-				lines = append(lines, "Saving...")
+				body = append(body, "", royalCyan.Render("Saving…"))
 			} else {
-				lines = append(lines, "Enter: save   Esc: back")
+				footer = royalMuted.Render("Enter Save setup   •   Esc Back")
 			}
 			if wf.Err != nil {
-				lines = append(lines, "Save error: "+wf.Err.Error())
+				body = append(body, "", royalRed.Render("Save error: "+wf.Err.Error()))
 			}
 		}
 	}
-done:
 	if p.FormActive && p.Form != nil {
-		lines = append(lines, "", p.Form.View())
+		body = append(body, "", p.Form.View())
 	}
-	if width > 0 && height > 0 {
-		lines = append(lines, fmt.Sprintf("%d×%d", width, height))
-	}
-	content := titleStyle.Render(strings.Join(lines, "\n"))
-	if height > 0 {
-		ls := strings.Split(content, "\n")
-		if len(ls) > height {
-			content = strings.Join(ls[:height], "\n")
-		}
-	}
-	return tea.NewView(content)
+	return tea.NewView(renderRoyalShell(width, height, progress, body, footer))
 }
 
 func View(width, height int, setupRequired bool, wf ...*setup.Workflow) tea.View {

@@ -82,6 +82,7 @@ func TestDiscoveryGuidesEmptySetupIntoLocalModels(t *testing.T) {
 				Err:      errors.New("connection refused"),
 			}})
 
+			m, _ = update(m, key("enter")) // welcome -> providers
 			m, inspect := update(m, key(pressed))
 			if !m.localModels.open || inspect == nil {
 				t.Fatalf("%s did not open local model setup", pressed)
@@ -155,7 +156,7 @@ func TestReadyModelContinuesIntoDiscoveryAndFocusesRoleSelection(t *testing.T) {
 	m, _ = update(m, inspect())
 	m, _ = update(m, key("right"))
 	m, command := update(m, key("enter"))
-	if m.localModels.open || !m.setup || m.screen != setup.StateDiscovery || command == nil || generation == 0 {
+	if m.localModels.open || !m.setup || m.screen != setup.StateWelcome || command == nil || generation == 0 {
 		t.Fatalf("did not enter setup discovery: setup=%v screen=%v", m.setup, m.screen)
 	}
 	m, _ = update(m, command())

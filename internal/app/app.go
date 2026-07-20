@@ -19,36 +19,38 @@ import (
 )
 
 type Model struct {
-	width, height int
-	config        config.Config
-	setup         bool
-	workflow      *setup.Workflow
-	defaults      []topology.Endpoint
-	discover      func(context.Context, uint64, []topology.Endpoint) tea.Cmd
-	save          func(config.Config) error
-	screen        setup.WorkflowState
-	role          int
-	modelIndex    int
-	gate          *setup.GenerationGate
-	form          ui.CustomEndpointForm
-	formActive    bool
-	chat          ui.ChatInput
-	history       []string
-	progress      string
-	chatError     string
-	run           RunFunc
-	runCancel     context.CancelFunc
-	runCh         <-chan orchestration.Event
-	runGen        uint64
-	running       bool
-	approval      *orchestration.ApprovalRequest
-	skills        skillState
-	memory        memoryState
-	localModels   localModelState
-	perfFocus     int
-	scanning      bool
-	saveGen       uint64
-	saving        bool
+	width, height    int
+	config           config.Config
+	setup            bool
+	workflow         *setup.Workflow
+	defaults         []topology.Endpoint
+	discover         func(context.Context, uint64, []topology.Endpoint) tea.Cmd
+	save             func(config.Config) error
+	screen           setup.WorkflowState
+	role             int
+	modelIndex       int
+	gate             *setup.GenerationGate
+	form             ui.CustomEndpointForm
+	formActive       bool
+	chat             ui.ChatInput
+	history          []string
+	progress         string
+	chatError        string
+	run              RunFunc
+	runCancel        context.CancelFunc
+	runCh            <-chan orchestration.Event
+	runGen           uint64
+	running          bool
+	approval         *orchestration.ApprovalRequest
+	skills           skillState
+	memory           memoryState
+	localModels      localModelState
+	providerCursor   int
+	providerSelected map[string]bool
+	perfFocus        int
+	scanning         bool
+	saveGen          uint64
+	saving           bool
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
@@ -99,9 +101,9 @@ func NewWithServices(c config.Config, services Services) Model {
 		gate:        &setup.GenerationGate{},
 		chat:        ui.NewChatInput(),
 	}
-	// An incomplete config starts in discovery; show scanning immediately when
-	// an automatic discovery dependency is available (before Init runs).
-	if model.setup && model.screen == setup.StateDiscovery && services.Discover != nil {
+	// An incomplete config scans in the background while the welcome screen is
+	// visible, so provider choices are ready when the user continues.
+	if model.setup && model.screen == setup.StateWelcome && services.Discover != nil {
 		model.scanning = true
 	}
 	return model
@@ -109,7 +111,7 @@ func NewWithServices(c config.Config, services Services) Model {
 func (m Model) RequiresSetup() bool       { return m.setup }
 func (m Model) Workflow() *setup.Workflow { return m.workflow }
 func (m Model) Init() tea.Cmd {
-	if m.setup && m.screen == setup.StateDiscovery {
+	if m.setup && (m.screen == setup.StateWelcome || m.screen == setup.StateProviders) {
 		_, cmd := m.beginDiscovery()
 		return cmd
 	}
@@ -134,9 +136,10 @@ func (m Model) startSetup() Model {
 	m.saveGen++
 	m.setup = true
 	m.workflow = setup.Start(m.config, m.defaults)
-	m.workflow.State = setup.StateDiscovery
-	m.screen = setup.StateDiscovery
-	m.modelIndex, m.role, m.perfFocus = 0, 0, 0
+	m.workflow.State = setup.StateWelcome
+	m.screen = setup.StateWelcome
+	m.modelIndex, m.role, m.providerCursor, m.perfFocus = 0, 0, 0, 0
+	m.providerSelected = nil
 	m.form = ui.CustomEndpointForm{}
 	m.formActive, m.saving = false, false
 	m.scanning = m.discover != nil
@@ -148,9 +151,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = x.Width, x.Height
 	case DiscoveryMsg:
-		if m.workflow != nil && m.screen == setup.StateDiscovery && m.gate.Accept(x.Generation) {
+		if m.workflow != nil && (m.screen == setup.StateWelcome || m.screen == setup.StateProviders) && m.gate.Accept(x.Generation) {
 			advanceToRoles := m.localModels.preferred != nil
 			m.workflow.Draft.ApplyResults(x.Results)
+			m.syncProviderSelection(x.Results)
 			if n := m.modelCount(); n == 0 {
 				m.modelIndex = 0
 			} else if m.modelIndex >= n {
@@ -159,6 +163,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scanning = false
 			m.focusPreferredModel()
 			if advanceToRoles && m.workflow.Err == nil {
+				if m.workflow.State == setup.StateWelcome {
+					_ = m.workflow.Continue()
+				}
 				if err := m.workflow.Continue(); err == nil {
 					m.screen = m.workflow.State
 				}
@@ -396,8 +403,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.setup && key == "q" {
 			return m, tea.Quit
 		}
-		manageModels := key == "ctrl+r" || (key == "m" && m.setup && m.screen == setup.StateDiscovery)
-		if manageModels && !m.running && m.localModels.manager != nil && (!m.setup || m.screen == setup.StateDiscovery) {
+		manageModels := key == "ctrl+r" || (key == "m" && m.setup && m.screen == setup.StateProviders)
+		if manageModels && !m.running && m.localModels.manager != nil && (!m.setup || m.screen == setup.StateProviders) {
 			return m, m.openLocalModels()
 		}
 		if !m.setup && key == "ctrl+s" {
@@ -465,11 +472,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat, cmd = m.chat.Update(msg)
 			return m, cmd
 		}
-		if key == "r" && m.screen == setup.StateDiscovery {
+		if key == "r" && (m.screen == setup.StateWelcome || m.screen == setup.StateProviders) {
 			m.localModels.preferred = nil
 			return m.beginDiscovery()
 		}
-		if key == "a" && m.screen == setup.StateDiscovery {
+		if key == "a" && m.screen == setup.StateProviders {
 			m.form = ui.NewCustomEndpointForm()
 			m.formActive = true
 			return m, nil
@@ -478,26 +485,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.gate.Cancel()
 			m.localModels.preferred = nil
 			m.scanning = false
-			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance {
+			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateProviders {
 				m.workflow.Back()
 				m.screen = m.workflow.State
 			}
 			return m, nil
 		}
 		switch m.screen {
-		case setup.StateDiscovery:
-			if key == "enter" {
-				if m.scanning {
-					return m, nil
-				}
-				if !m.workflow.Draft.HasModels() && m.localModels.manager != nil {
-					return m, m.openLocalModels()
-				}
-				if err := m.workflow.Continue(); err == nil {
-					m.gate.Cancel()
-					m.screen = m.workflow.State
-				}
-			}
+		case setup.StateWelcome:
+			return m.handleWelcomeKey(key)
+		case setup.StateProviders:
+			return m.handleProvidersKey(key)
 		case setup.StateRoles:
 			if key == "0" {
 				m.workflow.Draft.UseKingForCouncil(true)
@@ -585,7 +583,7 @@ func (m *Model) modelCount() int {
 	if m.workflow == nil {
 		return n
 	}
-	for _, r := range m.workflow.Draft.Results {
+	for _, r := range m.selectedProviderResults() {
 		n += len(r.Models)
 	}
 	return n
@@ -617,7 +615,7 @@ func (m *Model) assignCurrent() {
 	}
 	var chosen topology.Assignment
 	idx := m.modelIndex
-	for _, r := range m.workflow.Draft.Results {
+	for _, r := range m.selectedProviderResults() {
 		for _, model := range r.Models {
 			if idx == 0 {
 				chosen = topology.Assignment{EndpointID: r.Endpoint.ID, Model: model.ID}
@@ -655,5 +653,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, Role: m.role, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, SelectedProviders: m.providerSelected, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving})
 }

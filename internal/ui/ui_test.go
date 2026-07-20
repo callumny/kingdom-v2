@@ -9,7 +9,73 @@ import (
 	"github.com/callumny/kingdom/internal/discovery"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
+	"github.com/charmbracelet/x/ansi"
 )
+
+func TestWelcomeExplainsLocalModelsAndTradeoffs(t *testing.T) {
+	w := &setup.Workflow{State: setup.StateWelcome, Draft: setup.NewDraft(config.Default(), discovery.DefaultEndpoints())}
+	view := ViewWithPresentation(100, 32, true, w, Presentation{Scanning: true}).Content
+	for _, want := range []string{
+		"Welcome to Kingdom",
+		"entirely on your machine",
+		"up to three",
+		"Larger models",
+		"more RAM",
+		"Smaller models",
+		"Enter",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("welcome missing %q: %s", want, view)
+		}
+	}
+	assertViewFits(t, view, 100, 32)
+}
+
+func TestProviderViewHasProgressSelectionAndContextualHelp(t *testing.T) {
+	endpoints := discovery.DefaultEndpoints()
+	w := &setup.Workflow{State: setup.StateProviders, Draft: setup.NewDraft(config.Default(), endpoints)}
+	w.Draft.ApplyResults([]setup.EndpointResult{
+		{Endpoint: endpoints[0], Models: []discovery.Model{{ID: "one"}, {ID: "two"}}},
+		{Endpoint: endpoints[1], Err: errInvalidForTest{}},
+	})
+	view := ViewWithPresentation(100, 32, true, w, Presentation{
+		ProviderCursor: 1,
+		SelectedProviders: map[string]bool{
+			endpoints[0].ID: true,
+		},
+	}).Content
+	for _, want := range []string{
+		"1 Providers",
+		"2 Models",
+		"Choose your model providers",
+		"[✓]",
+		"Ollama",
+		"2 models",
+		"[ ]",
+		"LM Studio",
+		"Unavailable",
+		"Space Toggle",
+		"Enter Continue",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("providers missing %q: %s", want, view)
+		}
+	}
+	assertViewFits(t, view, 100, 32)
+}
+
+func assertViewFits(t *testing.T, view string, width, height int) {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	if len(lines) > height {
+		t.Fatalf("height=%d, want <= %d", len(lines), height)
+	}
+	for index, line := range lines {
+		if got := ansi.StringWidth(line); got > width {
+			t.Fatalf("line %d width=%d, want <= %d: %q", index, got, width, line)
+		}
+	}
+}
 
 func TestCustomFormQIsText(t *testing.T) {
 	f := NewCustomEndpointForm()
@@ -44,7 +110,7 @@ func TestCustomFormCanSelectProviderKind(t *testing.T) {
 
 func TestTinyTerminalViewDoesNotPanic(t *testing.T) {
 	v := View(1, 1, true)
-	if v.Content == "" || !strings.Contains(v.Content, "Kingdom") {
+	if v.Content == "" || ansi.StringWidth(v.Content) > 1 {
 		t.Fatalf("unexpected tiny view: %q", v.Content)
 	}
 }
@@ -92,12 +158,12 @@ func TestPerformanceMarkerFollowsFocus(t *testing.T) {
 }
 
 func TestPresentationRendererStates(t *testing.T) {
-	w := &setup.Workflow{State: setup.StateDiscovery, Draft: setup.Draft{Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e1", Name: "ep"}, Models: []discovery.Model{{ID: "m1"}}}}}}
+	w := &setup.Workflow{State: setup.StateProviders, Draft: setup.Draft{Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e1", Name: "ep"}, Models: []discovery.Model{{ID: "m1"}}}}}}
 	scanning := ViewWithPresentation(80, 40, true, w, Presentation{Scanning: true}).Content
-	if !strings.Contains(scanning, "Scanning...") {
+	if !strings.Contains(scanning, "Checking local providers") {
 		t.Fatal("scanning")
 	}
-	if strings.Contains(scanning, "Enter:") {
+	if strings.Contains(scanning, "Enter Continue") {
 		t.Fatalf("scanning view advertised a blocked action: %s", scanning)
 	}
 	roles := *w
@@ -117,7 +183,7 @@ func TestPresentationRendererStates(t *testing.T) {
 	rev := *w
 	rev.State = setup.StateReview
 	rev.Err = errInvalidForTest{}
-	if !strings.Contains(ViewWithPresentation(80, 40, true, &rev, Presentation{Saving: true}).Content, "Saving...") {
+	if !strings.Contains(ViewWithPresentation(80, 40, true, &rev, Presentation{Saving: true}).Content, "Saving…") {
 		t.Fatal("saving")
 	}
 	if got := strings.Count(ViewWithPresentation(80, 3, true, &rev, Presentation{}).Content, "\n") + 1; got > 3 {
@@ -130,13 +196,13 @@ func TestPresentationRendererStates(t *testing.T) {
 	}
 }
 
-func TestDiscoveryViewGuidesModelSetup(t *testing.T) {
-	w := &setup.Workflow{State: setup.StateDiscovery, Draft: setup.Draft{Results: []setup.EndpointResult{{
+func TestProviderViewGuidesUnavailableModelSetup(t *testing.T) {
+	w := &setup.Workflow{State: setup.StateProviders, Draft: setup.Draft{Results: []setup.EndpointResult{{
 		Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"},
 		Err:      errInvalidForTest{},
 	}}}}
 	view := ViewWithPresentation(100, 40, true, w, Presentation{}).Content
-	for _, want := range []string{"Enter: set up a model", "m: models", "No models discovered"} {
+	for _, want := range []string{"Choose your model providers", "m Manage models", "Unavailable"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("discovery guidance missing %q: %s", want, view)
 		}

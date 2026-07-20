@@ -187,6 +187,10 @@ func (m Model) handleLocalModelsKey(key string) (Model, tea.Cmd) {
 			m = m.startSetup()
 		}
 		m.localModels.open = false
+		if m.providerSelected == nil {
+			m.providerSelected = make(map[string]bool)
+		}
+		m.providerSelected[runtime.Endpoint.ID] = true
 		m.localModels.preferred = &topology.Assignment{EndpointID: runtime.Endpoint.ID, Model: modelID}
 		return m.beginDiscovery()
 	}

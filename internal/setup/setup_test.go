@@ -5,8 +5,34 @@ import (
 	"testing"
 
 	"github.com/callumny/kingdom/internal/config"
+	"github.com/callumny/kingdom/internal/discovery"
 	"github.com/callumny/kingdom/internal/topology"
 )
+
+func TestOnboardingStartsAtWelcomeThenProviders(t *testing.T) {
+	w := Start(config.Default(), discovery.DefaultEndpoints())
+	if w.State != StateWelcome {
+		t.Fatalf("initial state=%v, want welcome", w.State)
+	}
+	if err := w.Continue(); err != nil || w.State != StateProviders {
+		t.Fatalf("welcome continue: state=%v err=%v", w.State, err)
+	}
+	if err := w.Continue(); err == nil || w.State != StateProviders {
+		t.Fatalf("providers advanced without models: state=%v err=%v", w.State, err)
+	}
+	w.Draft.ApplyResults([]EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0], Models: []discovery.Model{{ID: "model"}}}})
+	if err := w.Continue(); err != nil || w.State != StateRoles {
+		t.Fatalf("providers continue: state=%v err=%v", w.State, err)
+	}
+	w.Back()
+	if w.State != StateProviders {
+		t.Fatalf("roles back=%v, want providers", w.State)
+	}
+	w.Back()
+	if w.State != StateWelcome {
+		t.Fatalf("providers back=%v, want welcome", w.State)
+	}
+}
 
 func TestMergeCandidatesOverride(t *testing.T) {
 	a := topology.Endpoint{ID: "x", Name: "default", Kind: topology.KindOllama, BaseURL: "http://localhost:1"}

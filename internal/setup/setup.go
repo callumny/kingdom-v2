@@ -148,7 +148,8 @@ func (d Draft) PersistenceEndpoints(previous []topology.Endpoint) []topology.End
 type WorkflowState int
 
 const (
-	StateDiscovery WorkflowState = iota
+	StateWelcome WorkflowState = iota
+	StateProviders
 	StateRoles
 	StatePerformance
 	StateReview
@@ -163,7 +164,7 @@ type Workflow struct {
 }
 
 func Start(existing config.Config, defaults []topology.Endpoint) *Workflow {
-	st := StateDiscovery
+	st := StateWelcome
 	if existing.IsReady() {
 		st = StateReady
 	}
@@ -171,7 +172,9 @@ func Start(existing config.Config, defaults []topology.Endpoint) *Workflow {
 }
 func (w *Workflow) Continue() error {
 	switch w.State {
-	case StateDiscovery:
+	case StateWelcome:
+		w.State = StateProviders
+	case StateProviders:
 		if !w.Draft.HasModels() {
 			return fmt.Errorf("at least one model is required")
 		}
@@ -192,7 +195,9 @@ func (w *Workflow) Back() {
 	} else if w.State == StatePerformance {
 		w.State = StateRoles
 	} else if w.State == StateRoles {
-		w.State = StateDiscovery
+		w.State = StateProviders
+	} else if w.State == StateProviders {
+		w.State = StateWelcome
 	}
 }
 func (w *Workflow) Save(ctx context.Context, save func(config.Config) error) error {

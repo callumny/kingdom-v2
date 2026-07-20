@@ -17,7 +17,12 @@ import (
 	"github.com/callumny/kingdom/internal/topology"
 )
 
-func key(s string) tea.KeyPressMsg { return tea.KeyPressMsg(tea.Key{Text: s}) }
+func key(s string) tea.KeyPressMsg {
+	if s == " " {
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeySpace, Text: s})
+	}
+	return tea.KeyPressMsg(tea.Key{Text: s})
+}
 
 func TestNewModelRendersFoundation(t *testing.T) {
 	view := New(config.Default()).View()
@@ -27,7 +32,7 @@ func TestNewModelRendersFoundation(t *testing.T) {
 }
 
 func TestViewReflectsSetupState(t *testing.T) {
-	if got := New(config.Default()).View().Content; !strings.Contains(got, "Setup required") {
+	if got := New(config.Default()).View().Content; !strings.Contains(got, "Welcome to Kingdom") {
 		t.Fatalf("incomplete config view = %q, want setup status", got)
 	}
 
@@ -87,17 +92,19 @@ func TestNoModelsBlocksContinue(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e"}}})
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateDiscovery {
+	m, _ = update(m, key("enter"))
+	if m.screen != setup.StateProviders {
 		t.Fatalf("advanced without models: %v", m.screen)
 	}
-	if m.workflow.Err != nil {
-		t.Fatalf("unexpected err: %v", m.workflow.Err)
+	if m.workflow.Err == nil {
+		t.Fatal("missing provider validation error")
 	}
 }
 
 func TestPartialDiscoveryStillAllowsAssignment(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e", Name: "E"}, Models: []discovery.Model{{ID: "m"}}}, {Endpoint: topology.Endpoint{ID: "bad"}, Err: errors.New("down")}})
+	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	if m.screen != setup.StateRoles {
 		t.Fatal("did not enter roles")
@@ -107,6 +114,7 @@ func TestPartialDiscoveryStillAllowsAssignment(t *testing.T) {
 func TestRoleSelectionDistinguishesEndpoint(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "one"}, Models: []discovery.Model{{ID: "m"}}}, {Endpoint: topology.Endpoint{ID: "two"}, Models: []discovery.Model{{ID: "m"}}}})
+	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("down"))
 	m, _ = update(m, key("2"))
@@ -120,6 +128,7 @@ func TestRoleSelectionDistinguishesEndpoint(t *testing.T) {
 func TestAssignmentNavigation(t *testing.T) {
 	m := NewWithDeps(config.Default(), nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "one"}, Models: []discovery.Model{{ID: "a"}, {ID: "b"}}}})
+	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("down"))
 	m, _ = update(m, key("1"))
@@ -163,7 +172,7 @@ func TestRescanCannotContinueWithStaleResults(t *testing.T) {
 		t.Fatal("rescan did not clear")
 	}
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateDiscovery {
+	if m.screen != setup.StateProviders {
 		t.Fatal("advanced while scanning")
 	}
 	m, _ = update(m, DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "new"}, Models: []discovery.Model{{ID: "m"}}}}})
@@ -199,6 +208,7 @@ func TestSaveSuccessBecomesReady(t *testing.T) {
 	m := NewWithDepsAndSave(config.Default(), nil, nil, func(config.Config) error { return nil })
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e"}, Models: []discovery.Model{{ID: "m"}}}})
 	m, _ = update(m, key("enter"))
+	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("1"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("2"))
@@ -220,7 +230,7 @@ func TestSaveSuccessBecomesReady(t *testing.T) {
 func TestSetupReopensFromReady(t *testing.T) {
 	m := New(completeConfig())
 	m, _ = update(m, key("ctrl+s"))
-	if !m.setup || m.screen != setup.StateDiscovery {
+	if !m.setup || m.screen != setup.StateWelcome {
 		t.Fatal("setup not reopened")
 	}
 }
@@ -273,10 +283,10 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 		}
 	}, nil)
 	m, cmd := update(m, key("ctrl+s"))
-	if !m.setup || m.screen != setup.StateDiscovery || m.workflow.State != setup.StateDiscovery {
+	if !m.setup || m.screen != setup.StateWelcome || m.workflow.State != setup.StateWelcome {
 		t.Fatalf("reopen state: setup=%v screen=%v workflow=%v", m.setup, m.screen, m.workflow.State)
 	}
-	if strings.Contains(m.View().Content, "Configuration ready") || !strings.Contains(m.View().Content, "Scanning") {
+	if strings.Contains(m.View().Content, "Configuration ready") || !strings.Contains(m.View().Content, "Looking for local model providers") {
 		t.Fatalf("reopen view=%q", m.View().Content)
 	}
 	if m.workflow.Draft.Config.Topology.Roles.King != c.Topology.Roles.King || m.workflow.Draft.Config.Topology.Roles.Worker != c.Topology.Roles.Worker {
@@ -291,6 +301,7 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 	}
 	m, _ = update(m, msg)
 	m, _ = update(m, key("enter"))
+	m, _ = update(m, key("enter"))
 	if m.screen != setup.StateRoles || m.workflow.State != setup.StateRoles {
 		t.Fatalf("discovery enter advanced to %v/%v, want roles", m.screen, m.workflow.State)
 	}
@@ -300,7 +311,7 @@ func TestInitialAutomaticDiscoveryShowsScanning(t *testing.T) {
 	m := NewWithDepsAndSave(config.Default(), nil, func(ctx context.Context, gen uint64, _ []topology.Endpoint) tea.Cmd {
 		return func() tea.Msg { return DiscoveryMsg{Generation: gen} }
 	}, nil)
-	if !strings.Contains(m.View().Content, "Scanning...") {
+	if !strings.Contains(m.View().Content, "Looking for local model providers") {
 		t.Fatalf("initial view=%q, want scanning", m.View().Content)
 	}
 	cmd := m.Init()
@@ -308,17 +319,17 @@ func TestInitialAutomaticDiscoveryShowsScanning(t *testing.T) {
 		t.Fatal("Init returned nil discovery command")
 	}
 	m, _ = update(m, cmd())
-	if !strings.Contains(m.View().Content, "Scan complete") {
+	if !strings.Contains(m.View().Content, "Found 0 available provider(s)") {
 		t.Fatalf("completed view=%q, want scan complete", m.View().Content)
 	}
 	ready := NewWithDepsAndSave(completeConfig(), nil, func(context.Context, uint64, []topology.Endpoint) tea.Cmd { return nil }, nil)
-	if strings.Contains(ready.View().Content, "Scanning...") || ready.Init() != nil {
+	if strings.Contains(ready.View().Content, "Looking for local model providers") || ready.Init() != nil {
 		t.Fatal("ready config should not scan automatically")
 	}
 }
 
 func TestControlCQuitsEveryScreen(t *testing.T) {
-	for _, screen := range []setup.WorkflowState{setup.StateDiscovery, setup.StateRoles, setup.StateReview, setup.StateReady} {
+	for _, screen := range []setup.WorkflowState{setup.StateWelcome, setup.StateProviders, setup.StateRoles, setup.StateReview, setup.StateReady} {
 		m := New(completeConfig())
 		m.setup = screen != setup.StateReady
 		m.screen = screen
@@ -355,6 +366,7 @@ func TestCustomEndpointIsIncludedInRescan(t *testing.T) {
 		got = eps
 		return func() tea.Msg { return DiscoveryMsg{Generation: gen} }
 	}, nil)
+	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("a"))
 	m.form.Name.SetValue("x")
 	m.form.BaseURL.SetValue("http://localhost")
@@ -539,9 +551,10 @@ func TestSetupIntegrationDiscoversAssignsSavesReloads(t *testing.T) {
 	if rescan != nil {
 		m, _ = update(m, rescan())
 	}
-	if m.screen != setup.StateDiscovery || !m.workflow.Draft.HasModels() {
+	if m.screen != setup.StateWelcome || !m.workflow.Draft.HasModels() {
 		t.Fatal("discovery failed")
 	}
+	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("1"))
 	m, _ = update(m, key("enter"))

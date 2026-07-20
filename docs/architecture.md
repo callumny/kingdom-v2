@@ -16,7 +16,9 @@ Kingdom is deliberately small and layered:
 * `internal/setup` owns the pure setup workflow, draft configuration, endpoint merging, and
   stale-discovery generation guard.
 * `internal/skills` parses, discovers, orders, and bounds reusable Markdown instruction packs.
-* `internal/ui` renders presentation without owning domain or infrastructure logic.
+* `internal/ui` renders presentation without owning domain or infrastructure logic. Its small semantic
+  theme maps meaning to colour and its shell owns responsive framing, while application state remains
+  unaware of terminal styling.
 
 Version 2 keeps its configuration, skills, and memory under `~/.kingdom/v2`. This prevents the strict
 v2 configuration loader from reading or overwriting files created by the original Kingdom CLI.
@@ -103,12 +105,16 @@ focused on the exact endpoint/model identity. No runtime adapter writes topology
 directly. Downloads, arbitrary model
 paths, remote binds, unloading, and process shutdown are outside this stage.
 
-The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears
-old results before a rescan and uses monotonically increasing generations so late responses cannot
-replace current state. Role identity is the endpoint ID plus model ID, which distinguishes the same
-model name served by different local runtimes. Configuration is not written until review. Once the
-atomic save command starts, keyboard input is temporarily blocked so the UI cannot claim to cancel a
-filesystem operation already in progress.
+The setup path starts with welcome -> providers -> role assignment -> performance -> review -> ready;
+a separate model-selection state will be inserted between providers and roles in the next onboarding
+increment. Discovery runs behind Welcome so it does not skip the explanation screen. Available
+providers are selected by default, and the user's transient provider choices filter downstream model
+choices without becoming persisted topology. Discovery clears old results before a rescan and uses
+monotonically increasing generations so late responses cannot replace current state. Role identity is
+the endpoint ID plus model ID, which distinguishes the same model name served by different local
+runtimes. Configuration is not written until review. Once the atomic save command starts, keyboard
+input is temporarily blocked so the UI cannot claim to cancel a filesystem operation already in
+progress.
 
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, model discovery, the
