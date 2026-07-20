@@ -50,6 +50,9 @@ type Model struct {
 	providerConfirming bool
 	providerInstalling bool
 	providerNotice     string
+	providerProgress   localmodels.InstallProgress
+	providerInstallCh  <-chan providerInstallEvent
+	providerInstallGen uint64
 	modelCursor        int
 	perfFocus          int
 	scanning           bool
@@ -81,12 +84,23 @@ type SaveMsg struct {
 }
 
 type ProviderInstaller interface {
-	Install(context.Context, localmodels.Kind, string, string) error
+	InstallWithProgress(context.Context, localmodels.Kind, string, string, localmodels.ProgressReporter) error
 }
 
-type providerInstalledMsg struct {
-	kind localmodels.Kind
-	err  error
+type providerInstallEvent struct {
+	progress *localmodels.InstallProgress
+	done     bool
+	err      error
+}
+
+type providerInstallEventMsg struct {
+	generation uint64
+	kind       localmodels.Kind
+	event      providerInstallEvent
+}
+
+type providerRuntimesMsg struct {
+	runtimes []localmodels.Runtime
 }
 
 func New(c config.Config) Model {
@@ -187,14 +201,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.scanning = false
 			m.focusPreferredModel()
+			if m.screen == setup.StateProviders && m.localModels.manager != nil {
+				return m, m.inspectProviderRuntimes()
+			}
 		}
-	case providerInstalledMsg:
-		if !m.providerInstalling {
+	case providerRuntimesMsg:
+		if m.workflow == nil || m.screen != setup.StateProviders {
 			return m, nil
 		}
+		for _, runtime := range x.runtimes {
+			switch runtime.Kind {
+			case localmodels.KindOllama:
+				m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, runtime.Installed && runtime.Running)
+			case localmodels.KindMLX:
+				m.workflow.Draft.SetProviderReady(setup.MLXEndpointID, runtime.Installed)
+			}
+		}
+	case providerInstallEventMsg:
+		if !m.providerInstalling || x.generation != m.providerInstallGen {
+			return m, nil
+		}
+		if x.event.progress != nil {
+			m.providerProgress = *x.event.progress
+			return m, m.nextProviderInstallEvent(x.kind)
+		}
+		if !x.event.done {
+			return m, m.nextProviderInstallEvent(x.kind)
+		}
 		m.providerInstalling = false
-		if x.err != nil {
-			m.workflow.Err = x.err
+		m.providerInstallCh = nil
+		if x.event.err != nil {
+			m.workflow.Err = x.event.err
 			m.providerNotice = ""
 			return m, nil
 		}
@@ -203,6 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if x.kind == localmodels.KindMLX {
 			endpointID = setup.MLXEndpointID
 		}
+		m.workflow.Draft.SetProviderReady(endpointID, true)
 		if err := m.workflow.Draft.SetProviderEnabled(endpointID, true, platform); err != nil {
 			m.workflow.Err = err
 			return m, nil
@@ -608,6 +646,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) inspectProviderRuntimes() tea.Cmd {
+	manager := m.localModels.manager
+	return func() tea.Msg {
+		return providerRuntimesMsg{runtimes: manager.Inspect(context.Background())}
+	}
+}
+
 func formatApproval(approval tools.Approval) string {
 	return fmt.Sprintf("Tool request: %s | target: %s | risk: %s | args: %s", approval.Call.Name, approval.Summary, approval.Risk, string(approval.Call.Arguments))
 }
@@ -679,5 +724,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
 }

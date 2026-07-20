@@ -93,6 +93,7 @@ type Draft struct {
 	Config         config.Config
 	Results        []EndpointResult
 	selectedModels []ModelRef
+	providerReady  map[string]bool
 }
 
 func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
@@ -107,6 +108,7 @@ func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
 	return Draft{
 		Config:         c,
 		selectedModels: selectedRoleModels(existing.Topology.Roles),
+		providerReady:  make(map[string]bool),
 	}
 }
 
@@ -131,8 +133,21 @@ func (d Draft) HasModels() bool {
 	}
 	return false
 }
-func (d Draft) Ready() bool                         { return d.Config.IsReady() }
-func (d *Draft) ApplyResults(rs []EndpointResult)   { d.Results = rs }
+func (d Draft) Ready() bool { return d.Config.IsReady() }
+func (d *Draft) ApplyResults(rs []EndpointResult) {
+	d.Results = rs
+	if d.providerReady == nil {
+		d.providerReady = make(map[string]bool)
+	}
+	for _, result := range rs {
+		if result.Err == nil {
+			d.providerReady[result.Endpoint.ID] = true
+			if result.Endpoint.Kind == topology.KindOllama {
+				d.providerReady[OllamaEndpointID] = true
+			}
+		}
+	}
+}
 func (d *Draft) AssignKing(a topology.Assignment)   { d.Config.Topology.Roles.King = a }
 func (d *Draft) AssignWorker(a topology.Assignment) { d.Config.Topology.Roles.Worker = a }
 func (d *Draft) AssignCouncil(a topology.Assignment) {
@@ -192,6 +207,9 @@ func (w *Workflow) Continue() error {
 	case StateProviders:
 		if !w.Draft.Config.Providers.AnyEnabled() {
 			return fmt.Errorf("enable at least one provider")
+		}
+		if err := w.Draft.ValidateEnabledProvidersReady(); err != nil {
+			return err
 		}
 		w.State = StateModels
 	case StateModels:

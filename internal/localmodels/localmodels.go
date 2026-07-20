@@ -125,7 +125,7 @@ func (m *Manager) ConfigureAndStart(ctx context.Context, kind Kind, port int) er
 			continue
 		}
 		provider.endpoint.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
-		return provider.start(ctx, "")
+		return m.StartAndWait(ctx, kind, "")
 	}
 	return errors.New("Ollama provider is unavailable")
 }

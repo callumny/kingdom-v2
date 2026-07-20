@@ -28,6 +28,8 @@ func TestSetupSavesRolesAcrossOllamaAndMLX(t *testing.T) {
 	m.workflow.Draft.ApplyResults(results)
 	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m.workflow.Draft.Config.Providers.MLX.Enabled = true
+	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
+	m.workflow.Draft.SetProviderReady(setup.MLXEndpointID, true)
 
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))

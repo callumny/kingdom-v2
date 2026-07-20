@@ -14,7 +14,7 @@ func TestModelsScreenSelectsAcrossProviders(t *testing.T) {
 	m := New(config.Default())
 	m.workflow.Draft.ApplyResults(crossProviderResults())
 
-	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	_ = m.workflow.Draft.SetProviderEnabled(setup.OllamaEndpointID, true, setup.Platform{OS: "linux", Arch: "amd64"})
 	m, _ = update(m, key("enter")) // providers -> models
 	if m.screen != setup.StateModels {
 		t.Fatalf("screen=%v, want models", m.screen)

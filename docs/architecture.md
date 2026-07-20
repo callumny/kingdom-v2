@@ -123,6 +123,14 @@ is installed into `~/.kingdom/v2/runtimes/mlx`, avoiding changes to the user's g
 Configured ports are applied to discovery as well as startup, so the health check observes the same
 loopback service that Kingdom launched.
 
+MLX installation prefers Python 3.10 or newer by explicit minor version, recreates a failed managed
+environment with `venv --clear`, upgrades pip/setuptools/wheel, and only then resolves MLX-LM. Command
+failures retain bounded diagnostic output instead of exposing only an exit status. Installer progress
+is streamed back into Bubble Tea as typed events, producing a named step and determinate bar without
+allowing infrastructure goroutines to mutate TUI state. Provider intent and readiness remain distinct:
+all enabled providers must be ready before setup can enter Models. Ollama readiness means installed
+and running; MLX readiness means its managed runtime is installed because its server is model-scoped.
+
 On first assignment, setup sorts selected models by normalized parameter metadata, then a parameter
 hint in the model ID, and finally local file size. The largest choice is suggested for King, the smallest
 for Worker, and a third choice for Council. With fewer than three choices Council starts disabled.

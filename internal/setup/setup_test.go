@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -39,6 +40,19 @@ func TestOnboardingStartsAtWelcomeThenProviders(t *testing.T) {
 	w.Back()
 	if w.State != StateProviders {
 		t.Fatalf("providers back=%v, want providers", w.State)
+	}
+}
+
+func TestEnabledProvidersMustBeReadyBeforeModels(t *testing.T) {
+	w := Start(config.Default(), discovery.DefaultEndpoints())
+	w.Draft.Config.Providers.MLX.Enabled = true
+	w.Draft.ApplyResults([]EndpointResult{{Endpoint: discovery.DefaultEndpoints()[1], Err: context.DeadlineExceeded}})
+	if err := w.Continue(); err == nil || !strings.Contains(err.Error(), "MLX") {
+		t.Fatalf("unready provider advanced: state=%v err=%v", w.State, err)
+	}
+	w.Draft.SetProviderReady(MLXEndpointID, true)
+	if err := w.Continue(); err != nil || w.State != StateModels {
+		t.Fatalf("ready provider did not advance: state=%v err=%v", w.State, err)
 	}
 }
 

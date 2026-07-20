@@ -15,7 +15,7 @@ func (m Model) handleProvidersKey(key string) (tea.Model, tea.Cmd) {
 		case "y":
 			m.providerConfirming = false
 			m.providerInstalling = true
-			return m, m.installSelectedProvider()
+			return m.beginProviderInstall()
 		case "n", "esc":
 			m.providerConfirming = false
 		}
@@ -47,6 +47,15 @@ func (m Model) handleProvidersKey(key string) (tea.Model, tea.Cmd) {
 		kind, ok := m.selectedProviderKind()
 		if !ok {
 			m.workflow.Err = fmt.Errorf("select Ollama or MLX")
+			return m, nil
+		}
+		endpointID := setup.OllamaEndpointID
+		if kind == localmodels.KindMLX {
+			endpointID = setup.MLXEndpointID
+		}
+		if m.workflow.Draft.ProviderReady(endpointID) {
+			m.workflow.Err = nil
+			m.providerNotice = "This provider is already ready."
 			return m, nil
 		}
 		platform := setup.CurrentPlatform()
@@ -86,32 +95,65 @@ func (m Model) selectedProviderKind() (localmodels.Kind, bool) {
 	}
 }
 
-func (m Model) installSelectedProvider() tea.Cmd {
+func (m Model) beginProviderInstall() (tea.Model, tea.Cmd) {
 	kind, ok := m.selectedProviderKind()
 	if !ok || m.installer == nil {
-		return func() tea.Msg {
-			return providerInstalledMsg{kind: kind, err: fmt.Errorf("provider installation is unavailable")}
-		}
+		m.providerInstalling = false
+		m.workflow.Err = fmt.Errorf("provider installation is unavailable")
+		return m, nil
 	}
 	installer := m.installer
 	manager := m.localModels.manager
 	platform := setup.CurrentPlatform()
 	ollamaPort := m.workflow.Draft.Config.Providers.Ollama.Port
-	return func() tea.Msg {
+	m.providerInstallGen++
+	generation := m.providerInstallGen
+	channel := make(chan providerInstallEvent, 16)
+	m.providerInstallCh = channel
+	m.providerProgress = localmodels.InstallProgress{Completed: 0, Total: 1, Message: "Starting provider setup"}
+	endpointID := setup.OllamaEndpointID
+	if kind == localmodels.KindMLX {
+		endpointID = setup.MLXEndpointID
+	}
+	m.workflow.Draft.SetProviderReady(endpointID, false)
+	go func() {
+		defer close(channel)
 		ctx := context.Background()
-		if err := installer.Install(ctx, kind, platform.OS, platform.Arch); err != nil {
-			return providerInstalledMsg{kind: kind, err: err}
+		report := func(progress localmodels.InstallProgress) {
+			value := progress
+			channel <- providerInstallEvent{progress: &value}
+		}
+		if err := installer.InstallWithProgress(ctx, kind, platform.OS, platform.Arch, report); err != nil {
+			channel <- providerInstallEvent{done: true, err: err}
+			return
 		}
 		if kind == localmodels.KindOllama {
 			if starter, ok := manager.(interface {
 				ConfigureAndStart(context.Context, localmodels.Kind, int) error
 			}); ok {
 				if err := starter.ConfigureAndStart(ctx, kind, ollamaPort); err != nil {
-					return providerInstalledMsg{kind: kind, err: err}
+					channel <- providerInstallEvent{done: true, err: err}
+					return
 				}
 			}
 		}
-		return providerInstalledMsg{kind: kind}
+		channel <- providerInstallEvent{done: true}
+	}()
+	return m, m.nextProviderInstallEventWithGeneration(kind, generation)
+}
+
+func (m Model) nextProviderInstallEvent(kind localmodels.Kind) tea.Cmd {
+	return m.nextProviderInstallEventWithGeneration(kind, m.providerInstallGen)
+}
+
+func (m Model) nextProviderInstallEventWithGeneration(kind localmodels.Kind, generation uint64) tea.Cmd {
+	channel := m.providerInstallCh
+	return func() tea.Msg {
+		event, ok := <-channel
+		if !ok {
+			event = providerInstallEvent{done: true}
+		}
+		return providerInstallEventMsg{generation: generation, kind: kind, event: event}
 	}
 }
 

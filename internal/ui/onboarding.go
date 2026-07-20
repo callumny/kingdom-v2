@@ -31,7 +31,7 @@ func providersSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		if wf.Draft.ProviderEnabled(result.Endpoint.ID) {
 			checked = "[✓]"
 		}
-		status := providerStatus(result)
+		status := providerStatus(result, wf.Draft.ProviderReady(result.Endpoint.ID))
 		if p.Scanning {
 			status = royalCyan.Render("Checking…")
 		}
@@ -56,13 +56,29 @@ func providersSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		footer = "y Confirm installation   •   n Cancel"
 	}
 	if p.ProviderInstalling {
-		body = append(body, "", royalCyan.Render("Installing provider…"))
+		body = append(body, "", royalCyan.Render(p.ProviderProgress.Message), providerProgressBar(p.ProviderProgress.Completed, p.ProviderProgress.Total), royalMuted.Render("Provider setup can take a few minutes."))
 		footer = "Installation in progress…"
 	}
 	if p.Scanning {
 		footer = "Checking providers…"
 	}
 	return body, royalMuted.Render(footer)
+}
+
+func providerProgressBar(completed, total int) string {
+	if total < 1 {
+		total = 1
+	}
+	if completed < 0 {
+		completed = 0
+	}
+	if completed > total {
+		completed = total
+	}
+	const width = 28
+	filled := completed * width / total
+	percent := completed * 100 / total
+	return royalGreen.Render("["+strings.Repeat("█", filled)) + royalMuted.Render(strings.Repeat("░", width-filled)+fmt.Sprintf("] %d%%", percent))
 }
 
 func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
@@ -115,7 +131,17 @@ func modelMetadata(option setup.ModelOption) string {
 	return strings.Join(parts, " · ")
 }
 
-func providerStatus(result setup.EndpointResult) string {
+func providerStatus(result setup.EndpointResult, ready bool) string {
+	if ready {
+		if len(result.Models) == 0 {
+			return royalGreen.Render("Ready")
+		}
+		label := "models"
+		if len(result.Models) == 1 {
+			label = "model"
+		}
+		return royalGreen.Render(fmt.Sprintf("Ready · %d %s", len(result.Models), label))
+	}
 	if result.Err != nil {
 		return royalRed.Render("Unavailable")
 	}

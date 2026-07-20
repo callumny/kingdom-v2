@@ -18,8 +18,10 @@ type fakeProviderInstaller struct {
 	err   error
 }
 
-func (f *fakeProviderInstaller) Install(_ context.Context, kind localmodels.Kind, _, _ string) error {
+func (f *fakeProviderInstaller) InstallWithProgress(_ context.Context, kind localmodels.Kind, _, _ string, report localmodels.ProgressReporter) error {
 	f.calls = append(f.calls, kind)
+	report(localmodels.InstallProgress{Completed: 1, Total: 2, Message: "Preparing provider"})
+	report(localmodels.InstallProgress{Completed: 2, Total: 2, Message: "Provider installed"})
 	return f.err
 }
 
@@ -76,7 +78,10 @@ func onboardingResults() []setup.EndpointResult {
 func TestProviderInstallRequiresExplicitConfirmation(t *testing.T) {
 	installer := &fakeProviderInstaller{}
 	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), Installer: installer})
-	m.workflow.Draft.ApplyResults(onboardingResults())
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{
+		{Endpoint: discovery.DefaultEndpoints()[0], Err: context.DeadlineExceeded},
+		{Endpoint: discovery.DefaultEndpoints()[1], Err: context.DeadlineExceeded},
+	})
 
 	m, command := update(m, key("i"))
 	if command != nil || !m.providerConfirming || len(installer.calls) != 0 {
@@ -92,8 +97,53 @@ func TestProviderInstallRequiresExplicitConfirmation(t *testing.T) {
 	if command == nil || !m.providerInstalling {
 		t.Fatal("confirmation did not start installation")
 	}
-	m, _ = update(m, command())
+	sawProgress := false
+	for command != nil {
+		m, command = update(m, command())
+		if strings.Contains(m.View().Content, "50%") && strings.Contains(m.View().Content, "Preparing provider") {
+			sawProgress = true
+		}
+	}
+	if !sawProgress {
+		t.Fatalf("installation progress was not rendered: %s", m.View().Content)
+	}
 	if m.providerInstalling || len(installer.calls) != 1 || installer.calls[0] != localmodels.KindOllama || !m.workflow.Draft.Config.Providers.Ollama.Enabled {
 		t.Fatalf("installation result: installing=%v calls=%v config=%+v", m.providerInstalling, installer.calls, m.workflow.Draft.Config.Providers)
+	}
+}
+
+func TestProvidersCannotContinueUntilEveryEnabledProviderIsReady(t *testing.T) {
+	m := NewWithServices(config.Default(), Services{})
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0], Err: context.DeadlineExceeded}})
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m, _ = update(m, key("enter"))
+	if m.screen != setup.StateProviders || m.workflow.Err == nil || !strings.Contains(m.workflow.Err.Error(), "Ollama") {
+		t.Fatalf("unready provider advanced: screen=%v err=%v", m.screen, m.workflow.Err)
+	}
+}
+
+func TestInstalledMLXIsReadyWithoutRunningAModelServer(t *testing.T) {
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{Kind: localmodels.KindMLX, Name: "MLX", Installed: true}}}
+	discover := func(_ context.Context, generation uint64, _ []topology.Endpoint) tea.Cmd {
+		return func() tea.Msg {
+			return DiscoveryMsg{Generation: generation, Results: []setup.EndpointResult{
+				{Endpoint: discovery.DefaultEndpoints()[0], Err: context.DeadlineExceeded},
+				{Endpoint: discovery.DefaultEndpoints()[1], Err: context.DeadlineExceeded},
+			}}
+		}
+	}
+	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), Discover: discover, LocalModels: manager})
+	m, inspect := update(m, m.Init()())
+	if inspect == nil {
+		t.Fatal("provider runtime inspection was not scheduled")
+	}
+	m, _ = update(m, inspect())
+	if !m.workflow.Draft.ProviderReady(setup.MLXEndpointID) {
+		t.Fatal("installed MLX runtime was not marked ready")
+	}
+	m.workflow.Draft.Config.Providers.MLX.Enabled = true
+	m, _ = update(m, key("enter"))
+	if m.screen != setup.StateModels {
+		t.Fatalf("installed MLX did not advance: screen=%v err=%v", m.screen, m.workflow.Err)
 	}
 }

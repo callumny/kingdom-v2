@@ -36,6 +36,25 @@ func (d Draft) ProviderEnabled(endpointID string) bool {
 	}
 }
 
+func (d Draft) ProviderReady(endpointID string) bool { return d.providerReady[endpointID] }
+
+func (d *Draft) SetProviderReady(endpointID string, ready bool) {
+	if d.providerReady == nil {
+		d.providerReady = make(map[string]bool)
+	}
+	d.providerReady[endpointID] = ready
+}
+
+func (d Draft) ValidateEnabledProvidersReady() error {
+	if d.Config.Providers.Ollama.Enabled && !d.ProviderReady(OllamaEndpointID) {
+		return fmt.Errorf("Ollama must finish setup before continuing")
+	}
+	if d.Config.Providers.MLX.Enabled && !d.ProviderReady(MLXEndpointID) {
+		return fmt.Errorf("MLX must finish setup before continuing")
+	}
+	return nil
+}
+
 func (d *Draft) SetProviderEnabled(endpointID string, enabled bool, platform Platform) error {
 	switch endpointID {
 	case OllamaEndpointID:
@@ -51,5 +70,20 @@ func (d *Draft) SetProviderEnabled(endpointID string, enabled bool, platform Pla
 	default:
 		return fmt.Errorf("unknown provider %q", endpointID)
 	}
+	if enabled && d.discoveredProviderReady(endpointID) {
+		d.SetProviderReady(endpointID, true)
+	}
 	return nil
+}
+
+func (d Draft) discoveredProviderReady(endpointID string) bool {
+	for _, result := range d.Results {
+		if result.Err != nil {
+			continue
+		}
+		if result.Endpoint.ID == endpointID || (endpointID == OllamaEndpointID && result.Endpoint.Kind == topology.KindOllama) {
+			return true
+		}
+	}
+	return false
 }

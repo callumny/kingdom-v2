@@ -14,6 +14,11 @@ the configured loopback port. MLX is supported only on Apple silicon and is inst
 `python3 -m venv` under Kingdom's runtime directory followed by `python -m pip install --upgrade mlx-lm`.
 Kingdom's MLX adapter checks that managed executable before searching `PATH`.
 
+MLX setup selects a verified Python 3.10+ interpreter, clears any incompatible partial environment,
+upgrades Python packaging tools, and then installs MLX-LM. Each installation reports typed progress
+events to the TUI. Enabled providers are a navigation gate: Ollama must be running, while MLX must be
+installed (its server cannot start until the user chooses a model).
+
 ## Why this shape
 
 The visible confirmation keeps network downloads and package installation at an explicit trust
@@ -26,4 +31,6 @@ can be tested without a terminal, network, or real model runtime.
 Tests first failed against the absent lifecycle. They now verify the confirmation gate and
 cancellation, exact argument-vector commands, official Ollama URL, temporary script execution,
 managed MLX environment, platform rejection, loopback port configuration, and application state after
-installation. `make check` covers the full repository and production build.
+installation. Regression tests cover incompatible system Python, packaging-tool upgrades, streamed
+progress, installed MLX without a model server, and blocking navigation for an unready enabled
+provider. `make check` covers the full repository and production build.

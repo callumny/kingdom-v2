@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"charm.land/bubbletea/v2"
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 )
@@ -15,6 +16,7 @@ type Presentation struct {
 	FormActive, Scanning, Saving                             bool
 	ProviderConfirming, ProviderInstalling                   bool
 	ProviderNotice                                           string
+	ProviderProgress                                         localmodels.InstallProgress
 }
 
 // ViewWithPresentation renders the complete presentation before applying the

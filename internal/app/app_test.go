@@ -179,8 +179,8 @@ func TestRescanCannotContinueWithStaleResults(t *testing.T) {
 	if m.screen != setup.StateProviders {
 		t.Fatal("advanced while scanning")
 	}
-	m, _ = update(m, DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "new"}, Models: []discovery.Model{{ID: "m"}}}}})
-	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m, _ = update(m, DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "new", Kind: topology.KindOllama}, Models: []discovery.Model{{ID: "m"}}}}})
+	_ = m.workflow.Draft.SetProviderEnabled(setup.OllamaEndpointID, true, setup.Platform{OS: "linux", Arch: "amd64"})
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
@@ -213,7 +213,8 @@ func update(m Model, msg tea.Msg) (Model, tea.Cmd) { n, c := m.Update(msg); retu
 
 func enterRolesWithModels(t *testing.T, m Model, refs ...setup.ModelRef) Model {
 	t.Helper()
-	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	_ = m.workflow.Draft.SetProviderEnabled(setup.OllamaEndpointID, true, setup.Platform{OS: "linux", Arch: "amd64"})
+	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
 	m, _ = update(m, key("enter")) // providers -> models
 	for _, ref := range refs {
 		if err := m.workflow.Draft.ToggleModel(ref); err != nil {
@@ -301,7 +302,7 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 	m := NewWithDepsAndSave(c, nil, func(ctx context.Context, gen uint64, _ []topology.Endpoint) tea.Cmd {
 		called = true
 		return func() tea.Msg {
-			return DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "local"}, Models: []discovery.Model{{ID: "k"}, {ID: "w"}}}}}
+			return DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "local", Kind: topology.KindOllama}, Models: []discovery.Model{{ID: "k"}, {ID: "w"}}}}}
 		}
 	}, nil)
 	m, cmd := update(m, key("ctrl+s"))
@@ -578,7 +579,7 @@ func TestSetupIntegrationDiscoversAssignsSavesReloads(t *testing.T) {
 	if m.screen != setup.StateProviders || !m.workflow.Draft.HasModels() {
 		t.Fatal("discovery failed")
 	}
-	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	_ = m.workflow.Draft.SetProviderEnabled(setup.OllamaEndpointID, true, setup.Platform{OS: "linux", Arch: "amd64"})
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("down"))
