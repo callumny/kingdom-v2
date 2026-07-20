@@ -44,14 +44,21 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 				lines = append(lines, "", "Scanning...")
 			} else {
 				lines = append(lines, "", "Scan complete")
+				if wf.Draft.HasModels() {
+					lines = append(lines, "Enter: assign roles   m: models   r: rescan   a: endpoint   q: quit")
+				} else {
+					lines = append(lines, "Enter: set up a model   m: models   r: rescan   a: endpoint   q: quit")
+				}
 			}
-			lines = append(lines, "Enter: continue   r: rescan   Ctrl+R: local models   q: quit")
 			for i, r := range wf.Draft.Results {
 				if i >= 200 {
 					lines = append(lines, "...")
 					break
 				}
 				lines = append(lines, r.Endpoint.Name+": "+string(setup.Status(r)))
+			}
+			if !p.Scanning && !wf.Draft.HasModels() {
+				lines = append(lines, "No models discovered. Press Enter or m to set one up.")
 			}
 			if wf.Err != nil {
 				lines = append(lines, "Discovery error: "+wf.Err.Error())

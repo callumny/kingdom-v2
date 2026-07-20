@@ -97,9 +97,10 @@ into the child environment. Long-running processes receive no terminal input/out
 process session, and intentionally survive Kingdom. All commands bypass a shell, command output is
 bounded, startup is cancellable, and readiness is capped at two minutes.
 
-After readiness, Ctrl+R refreshes normalized status. Entering a loaded model reuses the existing setup
-workflow: Kingdom rescans all endpoints and focuses the exact endpoint/model identity in role
-assignment. No runtime adapter writes topology configuration directly. Downloads, arbitrary model
+After readiness, the local-model screen refreshes normalized status. Entering a loaded model reuses
+the existing setup workflow: Kingdom rescans all endpoints and advances directly to role assignment,
+focused on the exact endpoint/model identity. No runtime adapter writes topology configuration
+directly. Downloads, arbitrary model
 paths, remote binds, unloading, and process shutdown are outside this stage.
 
 The setup path is discovery -> role assignment -> performance -> review -> ready. Discovery clears

@@ -72,6 +72,28 @@ func TestControlROpensLocalModelsAndKeepsKeysOutOfChat(t *testing.T) {
 	}
 }
 
+func TestDiscoveryGuidesEmptySetupIntoLocalModels(t *testing.T) {
+	for _, pressed := range []string{"enter", "m"} {
+		t.Run(pressed, func(t *testing.T) {
+			manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
+			m := NewWithServices(config.Default(), Services{LocalModels: manager})
+			m.workflow.Draft.ApplyResults([]setup.EndpointResult{{
+				Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"},
+				Err:      errors.New("connection refused"),
+			}})
+
+			m, inspect := update(m, key(pressed))
+			if !m.localModels.open || inspect == nil {
+				t.Fatalf("%s did not open local model setup", pressed)
+			}
+			m, _ = update(m, inspect())
+			if len(m.localModels.runtimes) != len(runtimeFixtures()) {
+				t.Fatalf("runtime inspection missing: %+v", m.localModels.runtimes)
+			}
+		})
+	}
+}
+
 func TestLocalModelStartRequiresConfirmationAndRefreshes(t *testing.T) {
 	manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
 	m := NewWithServices(completeConfig(), Services{LocalModels: manager})
@@ -137,12 +159,8 @@ func TestReadyModelContinuesIntoDiscoveryAndFocusesRoleSelection(t *testing.T) {
 		t.Fatalf("did not enter setup discovery: setup=%v screen=%v", m.setup, m.screen)
 	}
 	m, _ = update(m, command())
-	if m.screen != setup.StateDiscovery || m.modelIndex != 1 {
-		t.Fatalf("preferred alpha model index=%d results=%+v", m.modelIndex, m.workflow.Draft.Results)
-	}
-	m, _ = update(m, key("enter"))
 	if m.screen != setup.StateRoles || m.modelIndex != 1 {
-		t.Fatalf("role assignment did not preserve model focus: screen=%v index=%d", m.screen, m.modelIndex)
+		t.Fatalf("ready model did not go directly to focused role assignment: screen=%v index=%d", m.screen, m.modelIndex)
 	}
 }
 

@@ -62,7 +62,7 @@ func LocalModelsView(width, height int, runtimes []localmodels.Runtime, runtimeC
 		}
 		lines = append(lines, "", "Start "+name+"? It will continue running after Kingdom exits. y confirm   n cancel")
 	} else {
-		lines = append(lines, "", "h/l runtime   j/k model   s start   Enter assign   r refresh   Esc back")
+		lines = append(lines, "", "h/l runtime   j/k model   s start   Enter use for roles   r refresh   Esc back")
 	}
 	return tea.NewView(fitLocalModelsView(strings.Join(lines, "\n"), width, height))
 }

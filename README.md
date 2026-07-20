@@ -11,11 +11,12 @@ make check
 go run ./cmd/kingdom
 ```
 
-On first run, Kingdom opens setup and scans the default local endpoints. Use arrows or `j`/`k` to
-navigate, `Enter` to assign, `n` to continue from role assignment, `r` to rescan, and `a` to add a
-custom local endpoint. Press `q` on ordinary setup screens or `Ctrl+C` to exit; inside the custom
-endpoint form, `q` is normal text. While the reviewed configuration is being saved, keyboard input is
-briefly blocked until the atomic write succeeds or fails.
+On first run, Kingdom opens setup and scans the default local endpoints. If no model is ready, press
+`Enter` or `m` to open local model setup. Otherwise, `Enter` continues directly to role assignment.
+Use arrows or `j`/`k` to navigate, `Enter` to assign, `n` to continue from role assignment, `r` to
+rescan, and `a` to add a custom local endpoint. Press `q` on ordinary setup screens or `Ctrl+C` to
+exit; inside the custom endpoint form, `q` is normal text. While the reviewed configuration is being
+saved, keyboard input is briefly blocked until the atomic write succeeds or fails.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
@@ -28,11 +29,11 @@ idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return
 and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
 reported without discarding an otherwise valid King response.
 
-Press `Ctrl+R` while idle—or from the discovery step—to manage local models. Use `h`/`l` to choose
+Press `m` from setup discovery—or `Ctrl+R` while idle—to manage local models. Use `h`/`l` to choose
 Ollama, LM Studio, or MLX and `j`/`k` to choose an installed model. Press `s`, review the action, and
 press `y` to start it (`n` cancels). Kingdom waits for the loopback endpoint to become ready, then
 refreshes its model status. Press `Enter` on a ready model to reopen setup, rescan endpoints, and focus
-that model in role assignment.
+that model directly in role assignment.
 
 This version never downloads models, binds a server beyond loopback, or stops a process. Ollama can be
 started first and then refreshed to expose its installed models. LM Studio models come from

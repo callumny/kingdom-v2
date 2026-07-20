@@ -93,8 +93,12 @@ func TestPerformanceMarkerFollowsFocus(t *testing.T) {
 
 func TestPresentationRendererStates(t *testing.T) {
 	w := &setup.Workflow{State: setup.StateDiscovery, Draft: setup.Draft{Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e1", Name: "ep"}, Models: []discovery.Model{{ID: "m1"}}}}}}
-	if !strings.Contains(ViewWithPresentation(80, 40, true, w, Presentation{Scanning: true}).Content, "Scanning...") {
+	scanning := ViewWithPresentation(80, 40, true, w, Presentation{Scanning: true}).Content
+	if !strings.Contains(scanning, "Scanning...") {
 		t.Fatal("scanning")
+	}
+	if strings.Contains(scanning, "Enter:") {
+		t.Fatalf("scanning view advertised a blocked action: %s", scanning)
 	}
 	roles := *w
 	roles.State = setup.StateRoles
@@ -123,6 +127,19 @@ func TestPresentationRendererStates(t *testing.T) {
 	f.Err = errInvalidForTest{}
 	if !strings.Contains(ViewWithPresentation(80, 40, true, &rev, Presentation{FormActive: true, Form: &f}).Content, "Error: invalid") {
 		t.Fatal("form error")
+	}
+}
+
+func TestDiscoveryViewGuidesModelSetup(t *testing.T) {
+	w := &setup.Workflow{State: setup.StateDiscovery, Draft: setup.Draft{Results: []setup.EndpointResult{{
+		Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"},
+		Err:      errInvalidForTest{},
+	}}}}
+	view := ViewWithPresentation(100, 40, true, w, Presentation{}).Content
+	for _, want := range []string{"Enter: set up a model", "m: models", "No models discovered"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("discovery guidance missing %q: %s", want, view)
+		}
 	}
 }
 

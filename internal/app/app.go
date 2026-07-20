@@ -149,6 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = x.Width, x.Height
 	case DiscoveryMsg:
 		if m.workflow != nil && m.screen == setup.StateDiscovery && m.gate.Accept(x.Generation) {
+			advanceToRoles := m.localModels.preferred != nil
 			m.workflow.Draft.ApplyResults(x.Results)
 			if n := m.modelCount(); n == 0 {
 				m.modelIndex = 0
@@ -157,6 +158,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.scanning = false
 			m.focusPreferredModel()
+			if advanceToRoles && m.workflow.Err == nil {
+				if err := m.workflow.Continue(); err == nil {
+					m.screen = m.workflow.State
+				}
+			}
 		}
 	case localModelsMsg:
 		if !m.localModels.open || x.generation != m.localModels.generation {
@@ -390,7 +396,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.setup && key == "q" {
 			return m, tea.Quit
 		}
-		if key == "ctrl+r" && !m.running && m.localModels.manager != nil && (!m.setup || m.screen == setup.StateDiscovery) {
+		manageModels := key == "ctrl+r" || (key == "m" && m.setup && m.screen == setup.StateDiscovery)
+		if manageModels && !m.running && m.localModels.manager != nil && (!m.setup || m.screen == setup.StateDiscovery) {
 			return m, m.openLocalModels()
 		}
 		if !m.setup && key == "ctrl+s" {
@@ -459,6 +466,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if key == "r" && m.screen == setup.StateDiscovery {
+			m.localModels.preferred = nil
 			return m.beginDiscovery()
 		}
 		if key == "a" && m.screen == setup.StateDiscovery {
@@ -468,6 +476,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key == "esc" {
 			m.gate.Cancel()
+			m.localModels.preferred = nil
 			m.scanning = false
 			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance {
 				m.workflow.Back()
@@ -480,6 +489,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key == "enter" {
 				if m.scanning {
 					return m, nil
+				}
+				if !m.workflow.Draft.HasModels() && m.localModels.manager != nil {
+					return m, m.openLocalModels()
 				}
 				if err := m.workflow.Continue(); err == nil {
 					m.gate.Cancel()
