@@ -13,6 +13,8 @@ type Presentation struct {
 	Form                                                     *CustomEndpointForm
 	PreviousEndpoints                                        []topology.Endpoint
 	FormActive, Scanning, Saving                             bool
+	ProviderConfirming, ProviderInstalling                   bool
+	ProviderNotice                                           string
 }
 
 // ViewWithPresentation renders the complete presentation before applying the

@@ -8,9 +8,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 )
+
+type fakeProviderInstaller struct {
+	calls []localmodels.Kind
+	err   error
+}
+
+func (f *fakeProviderInstaller) Install(_ context.Context, kind localmodels.Kind, _, _ string) error {
+	f.calls = append(f.calls, kind)
+	return f.err
+}
 
 func TestOnboardingStartsWithProvidersAndScans(t *testing.T) {
 	discover := func(_ context.Context, generation uint64, _ []topology.Endpoint) tea.Cmd {
@@ -59,5 +70,30 @@ func onboardingResults() []setup.EndpointResult {
 	return []setup.EndpointResult{
 		{Endpoint: endpoints[0], Models: []discovery.Model{{ID: "ollama-model"}}},
 		{Endpoint: endpoints[1], Models: []discovery.Model{{ID: "mlx-model-a"}, {ID: "mlx-model-b"}}},
+	}
+}
+
+func TestProviderInstallRequiresExplicitConfirmation(t *testing.T) {
+	installer := &fakeProviderInstaller{}
+	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), Installer: installer})
+	m.workflow.Draft.ApplyResults(onboardingResults())
+
+	m, command := update(m, key("i"))
+	if command != nil || !m.providerConfirming || len(installer.calls) != 0 {
+		t.Fatalf("install was not gated: confirming=%v calls=%v", m.providerConfirming, installer.calls)
+	}
+	m, command = update(m, key("n"))
+	if command != nil || m.providerConfirming || len(installer.calls) != 0 {
+		t.Fatalf("cancel reached installer: confirming=%v calls=%v", m.providerConfirming, installer.calls)
+	}
+
+	m, _ = update(m, key("i"))
+	m, command = update(m, key("y"))
+	if command == nil || !m.providerInstalling {
+		t.Fatal("confirmation did not start installation")
+	}
+	m, _ = update(m, command())
+	if m.providerInstalling || len(installer.calls) != 1 || installer.calls[0] != localmodels.KindOllama || !m.workflow.Draft.Config.Providers.Ollama.Enabled {
+		t.Fatalf("installation result: installing=%v calls=%v config=%+v", m.providerInstalling, installer.calls, m.workflow.Draft.Config.Providers)
 	}
 }

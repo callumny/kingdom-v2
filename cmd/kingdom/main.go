@@ -34,7 +34,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	localModelManager := localmodels.New(localmodels.OSSystem{}, d, mlxCacheRoot)
+	runtimeRoot := filepath.Join(filepath.Dir(path), "runtimes")
+	localModelManager := localmodels.NewWithRuntimeRoot(localmodels.OSSystem{}, d, mlxCacheRoot, runtimeRoot)
+	providerInstaller := localmodels.NewInstaller(localmodels.OSSystem{}, runtimeRoot)
 	client := modelapi.NewClient()
 	workspace, err := os.Getwd()
 	if err != nil {
@@ -76,6 +78,7 @@ func main() {
 		Skills:      skillLibrary,
 		Memory:      memoryStore,
 		LocalModels: localModelManager,
+		Installer:   providerInstaller,
 	}
 	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)

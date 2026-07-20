@@ -47,7 +47,18 @@ func providersSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if wf.Err != nil {
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
-	footer := "↑↓ Move   •   Space Toggle   •   Enter Continue   •   r Rescan"
+	if p.ProviderNotice != "" {
+		body = append(body, "", royalGreen.Render(p.ProviderNotice))
+	}
+	footer := "↑↓ Move   •   Space Toggle   •   i Install   •   Enter Continue   •   r Rescan"
+	if p.ProviderConfirming {
+		body = append(body, "", royalGold.Render("Install this provider from its official source? y confirm   n cancel"))
+		footer = "y Confirm installation   •   n Cancel"
+	}
+	if p.ProviderInstalling {
+		body = append(body, "", royalCyan.Render("Installing provider…"))
+		footer = "Installation in progress…"
+	}
 	if p.Scanning {
 		footer = "Checking providers…"
 	}

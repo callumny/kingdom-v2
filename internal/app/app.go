@@ -19,38 +19,42 @@ import (
 )
 
 type Model struct {
-	width, height  int
-	config         config.Config
-	setup          bool
-	workflow       *setup.Workflow
-	defaults       []topology.Endpoint
-	discover       func(context.Context, uint64, []topology.Endpoint) tea.Cmd
-	save           func(config.Config) error
-	screen         setup.WorkflowState
-	role           int
-	modelIndex     int
-	gate           *setup.GenerationGate
-	form           ui.CustomEndpointForm
-	formActive     bool
-	chat           ui.ChatInput
-	history        []string
-	progress       string
-	chatError      string
-	run            RunFunc
-	runCancel      context.CancelFunc
-	runCh          <-chan orchestration.Event
-	runGen         uint64
-	running        bool
-	approval       *orchestration.ApprovalRequest
-	skills         skillState
-	memory         memoryState
-	localModels    localModelState
-	providerCursor int
-	modelCursor    int
-	perfFocus      int
-	scanning       bool
-	saveGen        uint64
-	saving         bool
+	width, height      int
+	config             config.Config
+	setup              bool
+	workflow           *setup.Workflow
+	defaults           []topology.Endpoint
+	discover           func(context.Context, uint64, []topology.Endpoint) tea.Cmd
+	save               func(config.Config) error
+	screen             setup.WorkflowState
+	role               int
+	modelIndex         int
+	gate               *setup.GenerationGate
+	form               ui.CustomEndpointForm
+	formActive         bool
+	chat               ui.ChatInput
+	history            []string
+	progress           string
+	chatError          string
+	run                RunFunc
+	runCancel          context.CancelFunc
+	runCh              <-chan orchestration.Event
+	runGen             uint64
+	running            bool
+	approval           *orchestration.ApprovalRequest
+	skills             skillState
+	memory             memoryState
+	localModels        localModelState
+	installer          ProviderInstaller
+	providerCursor     int
+	providerConfirming bool
+	providerInstalling bool
+	providerNotice     string
+	modelCursor        int
+	perfFocus          int
+	scanning           bool
+	saveGen            uint64
+	saving             bool
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
@@ -63,6 +67,7 @@ type Services struct {
 	Skills      SkillLibrary
 	Memory      MemoryBrowser
 	LocalModels LocalModelManager
+	Installer   ProviderInstaller
 }
 
 type DiscoveryMsg struct {
@@ -73,6 +78,15 @@ type SaveMsg struct {
 	Generation uint64
 	Config     config.Config
 	Err        error
+}
+
+type ProviderInstaller interface {
+	Install(context.Context, localmodels.Kind, string, string) error
+}
+
+type providerInstalledMsg struct {
+	kind localmodels.Kind
+	err  error
 }
 
 func New(c config.Config) Model {
@@ -96,6 +110,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		skills:      skillState{library: services.Skills},
 		memory:      memoryState{store: services.Memory},
 		localModels: localModelState{manager: services.LocalModels},
+		installer:   services.Installer,
 		workflow:    w,
 		screen:      w.State,
 		gate:        &setup.GenerationGate{},
@@ -126,6 +141,7 @@ func (m Model) beginDiscovery() (Model, tea.Cmd) {
 	m.workflow.Err = nil
 	m.modelIndex, m.modelCursor = 0, 0
 	cands := setup.MergeCandidates(m.defaults, m.workflow.Draft.Config.Topology.Endpoints)
+	cands = setup.ApplyProviderPorts(cands, m.workflow.Draft.Config.Providers)
 	return m, m.discover(ctx, gen, cands)
 }
 
@@ -172,6 +188,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scanning = false
 			m.focusPreferredModel()
 		}
+	case providerInstalledMsg:
+		if !m.providerInstalling {
+			return m, nil
+		}
+		m.providerInstalling = false
+		if x.err != nil {
+			m.workflow.Err = x.err
+			m.providerNotice = ""
+			return m, nil
+		}
+		platform := setup.CurrentPlatform()
+		endpointID := setup.OllamaEndpointID
+		if x.kind == localmodels.KindMLX {
+			endpointID = setup.MLXEndpointID
+		}
+		if err := m.workflow.Draft.SetProviderEnabled(endpointID, true, platform); err != nil {
+			m.workflow.Err = err
+			return m, nil
+		}
+		m.workflow.Err = nil
+		m.providerNotice = "Provider installed. Kingdom is checking it now."
+		return m.beginDiscovery()
 	case localModelsMsg:
 		if !m.localModels.open || x.generation != m.localModels.generation {
 			return m, nil
@@ -641,5 +679,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice})
 }

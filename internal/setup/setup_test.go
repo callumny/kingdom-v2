@@ -103,3 +103,16 @@ func TestPerformanceBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderPortsDetermineLoopbackEndpoints(t *testing.T) {
+	c := config.Default()
+	c.Providers.Ollama.Port = 12001
+	c.Providers.MLX.Port = 12002
+	endpoints := ApplyProviderPorts(discovery.DefaultEndpoints(), c.Providers)
+	if endpoints[0].BaseURL != "http://127.0.0.1:12001" || endpoints[1].BaseURL != "http://127.0.0.1:12002/v1" {
+		t.Fatalf("endpoints=%+v", endpoints)
+	}
+	if discovery.DefaultEndpoints()[0].BaseURL != "http://localhost:11434" {
+		t.Fatal("input endpoints were mutated")
+	}
+}

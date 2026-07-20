@@ -1,11 +1,29 @@
 package setup
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/callumny/kingdom/internal/config"
+	"github.com/callumny/kingdom/internal/topology"
+)
 
 const (
 	OllamaEndpointID = "ollama-local"
 	MLXEndpointID    = "mlx-local"
 )
+
+func ApplyProviderPorts(endpoints []topology.Endpoint, providers config.Providers) []topology.Endpoint {
+	configured := append([]topology.Endpoint(nil), endpoints...)
+	for index := range configured {
+		switch configured[index].ID {
+		case OllamaEndpointID:
+			configured[index].BaseURL = fmt.Sprintf("http://127.0.0.1:%d", providers.Ollama.Port)
+		case MLXEndpointID:
+			configured[index].BaseURL = fmt.Sprintf("http://127.0.0.1:%d/v1", providers.MLX.Port)
+		}
+	}
+	return configured
+}
 
 func (d Draft) ProviderEnabled(endpointID string) bool {
 	switch endpointID {

@@ -12,7 +12,9 @@ go run ./cmd/kingdom
 ```
 
 On first run, Kingdom starts at Providers and scans in the background. Use arrows and `Space` to enable
-Ollama or MLX, then continue to Models and select up to three choices. The role screen suggests the
+Ollama or MLX. Press `i` on an uninstalled provider and explicitly confirm before Kingdom installs it
+from its official source. Ollama is then started on its configured loopback port; MLX is installed in
+Kingdom's private Python environment and starts after a model is selected. Continue to Models and select up to three choices. The role screen suggests the
 largest selected model for King and the smallest for Worker. With three choices it suggests the middle
 model for Council; with fewer choices Council starts disabled. Every suggestion can be changed before
 the reviewed configuration is atomically saved.

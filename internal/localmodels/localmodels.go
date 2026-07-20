@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -56,14 +57,22 @@ type provider interface {
 type Manager struct{ providers []provider }
 
 func New(system System, discoverer Discoverer, mlxCacheRoot string) *Manager {
+	return NewWithRuntimeRoot(system, discoverer, mlxCacheRoot, "")
+}
+
+func NewWithRuntimeRoot(system System, discoverer Discoverer, mlxCacheRoot, runtimeRoot string) *Manager {
 	endpoints := discovery.DefaultEndpoints()
 	byID := make(map[string]topology.Endpoint, len(endpoints))
 	for _, endpoint := range endpoints {
 		byID[endpoint.ID] = endpoint
 	}
+	mlxExecutable := ""
+	if runtimeRoot != "" {
+		mlxExecutable = filepath.Join(runtimeRoot, "mlx", "bin", "mlx_lm.server")
+	}
 	return &Manager{providers: []provider{
 		&ollamaProvider{system: system, discoverer: discoverer, endpoint: byID["ollama-local"]},
-		&mlxProvider{system: system, discoverer: discoverer, endpoint: byID["mlx-local"], cacheRoot: mlxCacheRoot},
+		&mlxProvider{system: system, discoverer: discoverer, endpoint: byID["mlx-local"], cacheRoot: mlxCacheRoot, executable: mlxExecutable},
 	}}
 }
 
@@ -99,6 +108,26 @@ func (m *Manager) Start(ctx context.Context, kind Kind, modelID string) error {
 		}
 	}
 	return fmt.Errorf("unknown local runtime %q", kind)
+}
+
+// ConfigureAndStart applies provider-level network configuration before
+// launch. MLX is model-scoped and is therefore started only after selection.
+func (m *Manager) ConfigureAndStart(ctx context.Context, kind Kind, port int) error {
+	if port < 1 || port > 65535 {
+		return errors.New("provider port must be 1..65535")
+	}
+	if kind != KindOllama {
+		return fmt.Errorf("provider %q requires a model before startup", kind)
+	}
+	for _, candidate := range m.providers {
+		provider, ok := candidate.(*ollamaProvider)
+		if !ok {
+			continue
+		}
+		provider.endpoint.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+		return provider.start(ctx, "")
+	}
+	return errors.New("Ollama provider is unavailable")
 }
 
 func (m *Manager) StartAndWait(ctx context.Context, kind Kind, modelID string) error {

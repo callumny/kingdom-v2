@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,11 @@ func (p *ollamaProvider) start(_ context.Context, modelID string) error {
 	if err != nil {
 		return errors.New("Ollama CLI is not installed")
 	}
-	if err := p.system.Start(executable, []string{"serve"}, nil); err != nil {
+	host := "127.0.0.1:11434"
+	if parsed, err := url.Parse(p.endpoint.BaseURL); err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+	if err := p.system.Start(executable, []string{"serve"}, []string{"OLLAMA_HOST=" + host}); err != nil {
 		return fmt.Errorf("start Ollama: %w", err)
 	}
 	return nil
@@ -55,13 +60,14 @@ type mlxProvider struct {
 	discoverer Discoverer
 	endpoint   topology.Endpoint
 	cacheRoot  string
+	executable string
 }
 
 func (*mlxProvider) kind() Kind { return KindMLX }
 
 func (p *mlxProvider) inspect(ctx context.Context) Runtime {
 	result := Runtime{Kind: p.kind(), Name: "MLX", Endpoint: p.endpoint, InstallHint: "On Apple silicon, install the mlx-lm Python package"}
-	executable, err := p.system.LookPath("mlx_lm.server")
+	executable, err := p.serverExecutable()
 	if err != nil || executable == "" {
 		return result
 	}
@@ -78,7 +84,7 @@ func (p *mlxProvider) start(_ context.Context, modelID string) error {
 	if modelID == "" {
 		return errors.New("select an installed MLX model")
 	}
-	executable, err := p.system.LookPath("mlx_lm.server")
+	executable, err := p.serverExecutable()
 	if err != nil {
 		return errors.New("MLX LM server is not installed")
 	}
@@ -94,6 +100,15 @@ func (p *mlxProvider) start(_ context.Context, modelID string) error {
 		return fmt.Errorf("start MLX model: %w", err)
 	}
 	return nil
+}
+
+func (p *mlxProvider) serverExecutable() (string, error) {
+	if p.executable != "" {
+		if info, err := os.Stat(p.executable); err == nil && !info.IsDir() {
+			return p.executable, nil
+		}
+	}
+	return p.system.LookPath("mlx_lm.server")
 }
 
 func containsModel(models []Model, id string) bool {

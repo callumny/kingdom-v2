@@ -108,7 +108,7 @@ func TestStartUsesArgumentVectorsAndOfflineMLX(t *testing.T) {
 	}
 
 	wantStarted := []commandCall{
-		{name: "/tools/ollama", args: []string{"serve"}},
+		{name: "/tools/ollama", args: []string{"serve"}, env: []string{"OLLAMA_HOST=localhost:11434"}},
 		{name: "/tools/mlx_lm.server", args: []string{"--model", "mlx-community/Qwen-4bit", "--host", "127.0.0.1", "--port", "8080"}, env: []string{"HF_HUB_OFFLINE=1", "HF_HUB_CACHE=" + cache}},
 	}
 	if !reflect.DeepEqual(system.started, wantStarted) {
@@ -116,6 +116,18 @@ func TestStartUsesArgumentVectorsAndOfflineMLX(t *testing.T) {
 	}
 	if len(system.run) != 0 {
 		t.Fatalf("unexpected synchronous commands: %+v", system.run)
+	}
+}
+
+func TestConfigureAndStartOllamaUsesSelectedLoopbackPort(t *testing.T) {
+	system := &fakeSystem{paths: map[string]string{"ollama": "/tools/ollama"}}
+	manager := New(system, fakeDiscoverer{results: map[string]discovery.Result{}}, t.TempDir())
+	if err := manager.ConfigureAndStart(context.Background(), KindOllama, 12001); err != nil {
+		t.Fatal(err)
+	}
+	want := commandCall{name: "/tools/ollama", args: []string{"serve"}, env: []string{"OLLAMA_HOST=127.0.0.1:12001"}}
+	if len(system.started) != 1 || !reflect.DeepEqual(system.started[0], want) {
+		t.Fatalf("started=%+v want=%+v", system.started, want)
 	}
 }
 

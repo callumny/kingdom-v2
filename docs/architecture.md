@@ -116,6 +116,13 @@ runtimes. Configuration is not written until review. Once the atomic save comman
 input is temporarily blocked so the UI cannot claim to cancel a filesystem operation already in
 progress.
 
+Provider installation is a separate, injected capability and cannot run until the Providers screen
+receives a `y` confirmation. Ollama's official script is downloaded to a private temporary file and
+executed without interpolating user input; macOS and Linux are allowed. MLX requires macOS/arm64 and
+is installed into `~/.kingdom/v2/runtimes/mlx`, avoiding changes to the user's global Python packages.
+Configured ports are applied to discovery as well as startup, so the health check observes the same
+loopback service that Kingdom launched.
+
 On first assignment, setup sorts selected models by normalized parameter metadata, then a parameter
 hint in the model ID, and finally local file size. The largest choice is suggested for King, the smallest
 for Worker, and a third choice for Council. With fewer than three choices Council starts disabled.
