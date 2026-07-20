@@ -47,25 +47,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			body, footer = modelsSetupView(wf, p)
 		case setup.StateRoles:
 			progress = setupProgress(3)
-			label := map[int]string{0: "King", 1: "Worker", 2: "Council"}[p.Role]
-			if label == "" {
-				label = "King"
-			}
-			body = append(body, royalBrand.Render("Assign role: "+label), "", "1: King   2: Worker   3: Council   0: Council uses King")
-			for index, option := range wf.Draft.SelectedModels() {
-				marker := "  "
-				if index == p.ModelIndex {
-					marker = "> "
-				}
-				body = append(body, marker+option.Endpoint.Name+" / "+option.Ref.ModelID)
-			}
-			r := wf.Draft.Config.Topology.Roles
-			council := fmt.Sprintf("%s/%s", r.Council.EndpointID, r.Council.Model)
-			if wf.Draft.CouncilUseKing {
-				council = "uses King"
-			}
-			body = append(body, "", fmt.Sprintf("King: %s/%s  Worker: %s/%s  Council: %s", r.King.EndpointID, r.King.Model, r.Worker.EndpointID, r.Worker.Model, council))
-			footer = royalMuted.Render("↑↓ Move   •   Enter Assign   •   n Continue   •   Esc Back")
+			body, footer = rolesSetupView(wf, p)
 		case setup.StatePerformance:
 			progress = setupProgress(4)
 			body = append(body, royalBrand.Render("Advanced performance"), "", "Tune for your hardware.")

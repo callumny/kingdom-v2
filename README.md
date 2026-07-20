@@ -16,7 +16,8 @@ to inspect provider readiness; every ready provider automatically contributes it
 the Models screen, then use arrows and `Space` to select up to three models from any combination of
 Ollama, LM Studio, MLX, or custom local endpoints. Press `m` to inspect or start local model runtimes,
 `r` to rescan, and `a` to add a custom local endpoint. The role screen assigns only the selected models
-to King, Worker, and Council.
+to King, Worker, and Council. Kingdom suggests the largest selected model for King, the smallest for
+Worker, and the remaining model for Council; every suggestion can be changed before saving.
 Press `q` on ordinary setup screens or `Ctrl+C` to exit; inside the custom endpoint form, `q` is normal
 text. While the reviewed configuration is being saved, keyboard input is briefly blocked until the
 atomic write succeeds or fails.

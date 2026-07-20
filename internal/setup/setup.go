@@ -203,6 +203,9 @@ func (w *Workflow) Continue() error {
 		if len(w.Draft.SelectedModels()) == 0 {
 			return fmt.Errorf("select at least one model")
 		}
+		if err := w.Draft.ApplyRoleSuggestions(); err != nil {
+			return err
+		}
 		w.State = StateRoles
 	case StateRoles:
 		if !w.Draft.Config.Topology.Roles.King.Complete() || !w.Draft.Config.Topology.Roles.Worker.Complete() {

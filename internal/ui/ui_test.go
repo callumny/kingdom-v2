@@ -166,7 +166,7 @@ func TestPresentationRendererStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := ViewWithPresentation(80, 40, true, &roles, Presentation{ModelIndex: 0, Role: 1}).Content
-	for _, want := range []string{"Worker", "> ep / m1", "Council: uses King"} {
+	for _, want := range []string{"Editing: Worker", "ep / m1", "uses King"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}

@@ -100,10 +100,10 @@ process session, and intentionally survive Kingdom. All commands bypass a shell,
 bounded, startup is cancellable, and readiness is capped at two minutes.
 
 After readiness, the local-model screen refreshes normalized status. Entering a loaded model reuses
-the existing setup workflow: Kingdom rescans all endpoints and advances directly to role assignment,
-focused on the exact endpoint/model identity. No runtime adapter writes topology configuration
-directly. Downloads, arbitrary model
-paths, remote binds, unloading, and process shutdown are outside this stage.
+the existing setup workflow: Kingdom rescans all endpoints, returns to the current setup step, and
+focuses the exact endpoint/model identity in the model catalogue. It never selects a model or advances
+setup on the user's behalf. No runtime adapter writes topology configuration directly. Downloads,
+arbitrary model paths, remote binds, unloading, and process shutdown are outside this stage.
 
 The setup path is welcome -> providers -> models -> role assignment -> performance -> review -> ready.
 Discovery runs behind Welcome so it does not skip the explanation screen. Providers represent runtime
@@ -112,11 +112,16 @@ model catalogue. A model is identified by its endpoint ID plus model ID, so the 
 three choices across different providers without collisions. This selection is transient; persisted
 topology still contains only role assignments and their referenced endpoints. Discovery clears old
 results before a rescan, reconciles choices that disappeared, and uses monotonically increasing
-generations so late responses cannot replace current state. Role identity is
-the endpoint ID plus model ID, which distinguishes the same model name served by different local
+generations so late responses cannot replace current state. Role identity is the endpoint ID plus
+model ID, which distinguishes the same model name served by different local
 runtimes. Configuration is not written until review. Once the atomic save command starts, keyboard
 input is temporarily blocked so the UI cannot claim to cancel a filesystem operation already in
 progress.
+
+On first assignment, setup sorts selected models by normalized parameter metadata, then a parameter
+hint in the model ID, and finally local file size. The largest choice is suggested for King, the smallest
+for Worker, and a third choice for Council. One or two choices use King as Council. Suggestions are
+defaults rather than policy: valid manual assignments are preserved when the user revisits Models.
 
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, model discovery, the
