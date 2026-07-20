@@ -33,7 +33,7 @@ func (d *Draft) ApplyRoleSuggestions() error {
 	d.AssignKing(largest)
 	d.AssignWorker(smallest)
 	if len(ordered) < 3 {
-		d.UseKingForCouncil(true)
+		d.SetCouncilEnabled(false)
 	} else {
 		d.AssignCouncil(ordered[len(ordered)/2].Ref.Assignment())
 	}
@@ -49,7 +49,7 @@ func (d Draft) rolesUseSelectedModels(selected []ModelOption) bool {
 	if !available[assignmentRef(roles.King)] || !available[assignmentRef(roles.Worker)] {
 		return false
 	}
-	return d.CouncilUseKing || available[assignmentRef(roles.Council)]
+	return !d.Config.CouncilEnabled || available[assignmentRef(roles.Council)]
 }
 
 func assignmentRef(assignment topology.Assignment) ModelRef {

@@ -101,9 +101,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		gate:        &setup.GenerationGate{},
 		chat:        ui.NewChatInput(),
 	}
-	// An incomplete config scans in the background while the welcome screen is
-	// visible, so provider choices are ready when the user continues.
-	if model.setup && model.screen == setup.StateWelcome && services.Discover != nil {
+	if model.setup && model.screen == setup.StateProviders && services.Discover != nil {
 		model.scanning = true
 	}
 	return model
@@ -111,7 +109,7 @@ func NewWithServices(c config.Config, services Services) Model {
 func (m Model) RequiresSetup() bool       { return m.setup }
 func (m Model) Workflow() *setup.Workflow { return m.workflow }
 func (m Model) Init() tea.Cmd {
-	if m.setup && (m.screen == setup.StateWelcome || m.screen == setup.StateProviders) {
+	if m.setup && m.screen == setup.StateProviders {
 		_, cmd := m.beginDiscovery()
 		return cmd
 	}
@@ -136,8 +134,8 @@ func (m Model) startSetup() Model {
 	m.saveGen++
 	m.setup = true
 	m.workflow = setup.Start(m.config, m.defaults)
-	m.workflow.State = setup.StateWelcome
-	m.screen = setup.StateWelcome
+	m.workflow.State = setup.StateProviders
+	m.screen = setup.StateProviders
 	m.modelIndex, m.modelCursor, m.role, m.providerCursor, m.perfFocus = 0, 0, 0, 0, 0
 	m.form = ui.CustomEndpointForm{}
 	m.formActive, m.saving = false, false
@@ -150,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = x.Width, x.Height
 	case DiscoveryMsg:
-		if m.workflow != nil && (m.screen == setup.StateWelcome || m.screen == setup.StateProviders || m.screen == setup.StateModels) && m.gate.Accept(x.Generation) {
+		if m.workflow != nil && (m.screen == setup.StateProviders || m.screen == setup.StateModels) && m.gate.Accept(x.Generation) {
 			m.workflow.Draft.ApplyResults(x.Results)
 			removed := m.workflow.Draft.ReconcileModelSelection()
 			if len(removed) > 0 {
@@ -475,7 +473,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat, cmd = m.chat.Update(msg)
 			return m, cmd
 		}
-		if key == "r" && (m.screen == setup.StateWelcome || m.screen == setup.StateProviders || m.screen == setup.StateModels) {
+		if key == "r" && (m.screen == setup.StateProviders || m.screen == setup.StateModels) {
 			m.localModels.preferred = nil
 			return m.beginDiscovery()
 		}
@@ -495,15 +493,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch m.screen {
-		case setup.StateWelcome:
-			return m.handleWelcomeKey(key)
 		case setup.StateProviders:
 			return m.handleProvidersKey(key)
 		case setup.StateModels:
 			return m.handleModelsKey(key)
 		case setup.StateRoles:
 			if key == "0" {
-				m.workflow.Draft.UseKingForCouncil(true)
+				m.workflow.Draft.SetCouncilEnabled(false)
 			}
 			if key == "up" || key == "k" {
 				if m.modelIndex > 0 {
@@ -528,9 +524,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key == "enter" {
 				m.assignCurrent()
 			}
-			if key == "n" && m.workflow.Draft.Config.Topology.Roles.King.Complete() && m.workflow.Draft.Config.Topology.Roles.Worker.Complete() {
+			if key == "n" {
 				if err := m.workflow.Continue(); err == nil {
 					m.screen = m.workflow.State
+					m.workflow.Err = nil
+				} else {
+					m.workflow.Err = err
 				}
 			}
 		case setup.StatePerformance:

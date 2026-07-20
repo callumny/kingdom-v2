@@ -16,9 +16,8 @@ import (
 type Kind string
 
 const (
-	KindOllama   Kind = "ollama"
-	KindLMStudio Kind = "lm-studio"
-	KindMLX      Kind = "mlx"
+	KindOllama Kind = "ollama"
+	KindMLX    Kind = "mlx"
 )
 
 type Model struct {
@@ -64,7 +63,6 @@ func New(system System, discoverer Discoverer, mlxCacheRoot string) *Manager {
 	}
 	return &Manager{providers: []provider{
 		&ollamaProvider{system: system, discoverer: discoverer, endpoint: byID["ollama-local"]},
-		&lmStudioProvider{system: system, discoverer: discoverer, endpoint: byID["lm-studio-local"]},
 		&mlxProvider{system: system, discoverer: discoverer, endpoint: byID["mlx-local"], cacheRoot: mlxCacheRoot},
 	}}
 }

@@ -32,7 +32,7 @@ func TestNewModelRendersFoundation(t *testing.T) {
 }
 
 func TestViewReflectsSetupState(t *testing.T) {
-	if got := New(config.Default()).View().Content; !strings.Contains(got, "Welcome to Kingdom") {
+	if got := New(config.Default()).View().Content; !strings.Contains(got, "Set up model providers") {
 		t.Fatalf("incomplete config view = %q, want setup status", got)
 	}
 
@@ -68,9 +68,11 @@ func TestConfigSetupStateIntegration(t *testing.T) {
 
 func completeConfig() config.Config {
 	c := config.Default()
+	c.Providers.Ollama.Enabled = true
 	c.Topology.Endpoints = []topology.Endpoint{{ID: "local", Name: "Local", Kind: topology.KindOllama, BaseURL: "http://localhost"}}
 	c.Topology.Roles.King = topology.Assignment{EndpointID: "local", Model: "k"}
 	c.Topology.Roles.Worker = topology.Assignment{EndpointID: "local", Model: "w"}
+	c.Topology.Roles.Council = c.Topology.Roles.King
 	return c
 }
 
@@ -178,6 +180,7 @@ func TestRescanCannotContinueWithStaleResults(t *testing.T) {
 		t.Fatal("advanced while scanning")
 	}
 	m, _ = update(m, DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "new"}, Models: []discovery.Model{{ID: "m"}}}}})
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
@@ -210,7 +213,7 @@ func update(m Model, msg tea.Msg) (Model, tea.Cmd) { n, c := m.Update(msg); retu
 
 func enterRolesWithModels(t *testing.T, m Model, refs ...setup.ModelRef) Model {
 	t.Helper()
-	m, _ = update(m, key("enter")) // welcome -> providers
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m, _ = update(m, key("enter")) // providers -> models
 	for _, ref := range refs {
 		if err := m.workflow.Draft.ToggleModel(ref); err != nil {
@@ -246,7 +249,7 @@ func TestSaveSuccessBecomesReady(t *testing.T) {
 func TestSetupReopensFromReady(t *testing.T) {
 	m := New(completeConfig())
 	m, _ = update(m, key("ctrl+s"))
-	if !m.setup || m.screen != setup.StateWelcome {
+	if !m.setup || m.screen != setup.StateProviders {
 		t.Fatal("setup not reopened")
 	}
 }
@@ -285,6 +288,7 @@ func TestRolesAssignWithoutAutoAdvanceAndExplicitNext(t *testing.T) {
 	if m.screen != setup.StateRoles || !m.workflow.Draft.Config.Topology.Roles.Worker.Complete() {
 		t.Fatalf("worker assignment advanced or failed: screen=%v", m.screen)
 	}
+	m, _ = update(m, key("0"))
 	m, _ = update(m, key("n"))
 	if m.screen != setup.StatePerformance || m.workflow.State != setup.StatePerformance {
 		t.Fatalf("explicit next did not advance: screen=%v state=%v", m.screen, m.workflow.State)
@@ -301,10 +305,10 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 		}
 	}, nil)
 	m, cmd := update(m, key("ctrl+s"))
-	if !m.setup || m.screen != setup.StateWelcome || m.workflow.State != setup.StateWelcome {
+	if !m.setup || m.screen != setup.StateProviders || m.workflow.State != setup.StateProviders {
 		t.Fatalf("reopen state: setup=%v screen=%v workflow=%v", m.setup, m.screen, m.workflow.State)
 	}
-	if strings.Contains(m.View().Content, "Configuration ready") || !strings.Contains(m.View().Content, "Looking for local model providers") {
+	if strings.Contains(m.View().Content, "Configuration ready") || !strings.Contains(m.View().Content, "Checking local providers") {
 		t.Fatalf("reopen view=%q", m.View().Content)
 	}
 	if m.workflow.Draft.Config.Topology.Roles.King != c.Topology.Roles.King || m.workflow.Draft.Config.Topology.Roles.Worker != c.Topology.Roles.Worker {
@@ -330,7 +334,7 @@ func TestInitialAutomaticDiscoveryShowsScanning(t *testing.T) {
 	m := NewWithDepsAndSave(config.Default(), nil, func(ctx context.Context, gen uint64, _ []topology.Endpoint) tea.Cmd {
 		return func() tea.Msg { return DiscoveryMsg{Generation: gen} }
 	}, nil)
-	if !strings.Contains(m.View().Content, "Looking for local model providers") {
+	if !strings.Contains(m.View().Content, "Checking local providers") {
 		t.Fatalf("initial view=%q, want scanning", m.View().Content)
 	}
 	cmd := m.Init()
@@ -338,7 +342,7 @@ func TestInitialAutomaticDiscoveryShowsScanning(t *testing.T) {
 		t.Fatal("Init returned nil discovery command")
 	}
 	m, _ = update(m, cmd())
-	if !strings.Contains(m.View().Content, "Found 0 available provider(s)") {
+	if !strings.Contains(m.View().Content, "No providers answered") {
 		t.Fatalf("completed view=%q, want scan complete", m.View().Content)
 	}
 	ready := NewWithDepsAndSave(completeConfig(), nil, func(context.Context, uint64, []topology.Endpoint) tea.Cmd { return nil }, nil)
@@ -348,7 +352,7 @@ func TestInitialAutomaticDiscoveryShowsScanning(t *testing.T) {
 }
 
 func TestControlCQuitsEveryScreen(t *testing.T) {
-	for _, screen := range []setup.WorkflowState{setup.StateWelcome, setup.StateProviders, setup.StateModels, setup.StateRoles, setup.StateReview, setup.StateReady} {
+	for _, screen := range []setup.WorkflowState{setup.StateProviders, setup.StateModels, setup.StateRoles, setup.StateReview, setup.StateReady} {
 		m := New(completeConfig())
 		m.setup = screen != setup.StateReady
 		m.screen = screen
@@ -528,8 +532,8 @@ func TestCouncilCanUseKing(t *testing.T) {
 	m.screen, m.workflow.State = setup.StateRoles, setup.StateRoles
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e"}, Models: []discovery.Model{{ID: "m"}}}})
 	m, _ = update(m, key("0"))
-	if !m.workflow.Draft.CouncilUseKing {
-		t.Fatal("king fallback not selected")
+	if m.workflow.Draft.Config.CouncilEnabled {
+		t.Fatal("council was not disabled")
 	}
 }
 
@@ -571,10 +575,10 @@ func TestSetupIntegrationDiscoversAssignsSavesReloads(t *testing.T) {
 	if rescan != nil {
 		m, _ = update(m, rescan())
 	}
-	if m.screen != setup.StateWelcome || !m.workflow.Draft.HasModels() {
+	if m.screen != setup.StateProviders || !m.workflow.Draft.HasModels() {
 		t.Fatal("discovery failed")
 	}
-	m, _ = update(m, key("enter"))
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("down"))

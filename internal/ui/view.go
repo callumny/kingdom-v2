@@ -37,8 +37,6 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			return tea.NewView(renderRoyalShell(width, height, progress, body, footer))
 		}
 		switch wf.State {
-		case setup.StateWelcome:
-			body, footer = welcomeSetupView(wf, p)
 		case setup.StateProviders:
 			progress = setupProgress(1)
 			body, footer = providersSetupView(wf, p)
@@ -62,8 +60,8 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			body = append(body, royalBrand.Render("Review your setup"), "")
 			r := wf.Draft.Config.Topology.Roles
 			council := fmt.Sprintf("%s/%s", r.Council.EndpointID, r.Council.Model)
-			if wf.Draft.CouncilUseKing {
-				council = "uses King"
+			if !wf.Draft.Config.CouncilEnabled {
+				council = "disabled"
 			}
 			body = append(body,
 				fmt.Sprintf("King: %s/%s", r.King.EndpointID, r.King.Model),

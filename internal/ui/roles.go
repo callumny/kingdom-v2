@@ -19,7 +19,7 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		royalText.Render("Council")+royalMuted.Render(" — provides independent review; a different model adds perspective."),
 		"",
 		royalGold.Render("Editing: "+roleName),
-		royalMuted.Render("Press 1 for King, 2 for Worker, 3 for Council, or 0 for Council to use King."),
+		royalMuted.Render("Press 1 for King, 2 for Worker, 3 for Council, or 0 to disable the Council."),
 		"",
 	)
 	for index, option := range wf.Draft.SelectedModels() {
@@ -35,8 +35,8 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		"King:    "+assignmentLabel(roles.King, wf),
 		"Worker:  "+assignmentLabel(roles.Worker, wf),
 	)
-	if wf.Draft.CouncilUseKing {
-		body = append(body, "Council: "+royalMuted.Render("uses King"))
+	if !wf.Draft.Config.CouncilEnabled {
+		body = append(body, "Council: "+royalMuted.Render("disabled"))
 	} else {
 		body = append(body, "Council: "+assignmentLabel(roles.Council, wf))
 	}

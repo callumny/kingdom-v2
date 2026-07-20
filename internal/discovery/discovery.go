@@ -88,7 +88,6 @@ func New(o Options) *Discovery {
 func DefaultEndpoints() []topology.Endpoint {
 	return []topology.Endpoint{
 		{ID: "ollama-local", Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://localhost:11434"},
-		{ID: "lm-studio-local", Name: "LM Studio", Kind: topology.KindOpenAICompatible, BaseURL: "http://localhost:1234/v1"},
 		{ID: "mlx-local", Name: "MLX", Kind: topology.KindOpenAICompatible, BaseURL: "http://localhost:8080/v1"},
 	}
 }

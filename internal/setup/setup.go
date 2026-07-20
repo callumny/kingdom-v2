@@ -92,7 +92,6 @@ func DedupeEndpoints(eps []topology.Endpoint) []topology.Endpoint { return Merge
 type Draft struct {
 	Config         config.Config
 	Results        []EndpointResult
-	CouncilUseKing bool
 	selectedModels []ModelRef
 }
 
@@ -107,7 +106,6 @@ func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
 	}
 	return Draft{
 		Config:         c,
-		CouncilUseKing: existing.Topology.Roles.Council.Empty(),
 		selectedModels: selectedRoleModels(existing.Topology.Roles),
 	}
 }
@@ -139,11 +137,11 @@ func (d *Draft) AssignKing(a topology.Assignment)   { d.Config.Topology.Roles.Ki
 func (d *Draft) AssignWorker(a topology.Assignment) { d.Config.Topology.Roles.Worker = a }
 func (d *Draft) AssignCouncil(a topology.Assignment) {
 	d.Config.Topology.Roles.Council = a
-	d.CouncilUseKing = false
+	d.Config.CouncilEnabled = true
 }
-func (d *Draft) UseKingForCouncil(v bool) {
-	d.CouncilUseKing = v
-	if v {
+func (d *Draft) SetCouncilEnabled(enabled bool) {
+	d.Config.CouncilEnabled = enabled
+	if !enabled {
 		d.Config.Topology.Roles.Council = topology.Assignment{}
 	}
 }
@@ -167,8 +165,7 @@ func (d Draft) PersistenceEndpoints(previous []topology.Endpoint) []topology.End
 type WorkflowState int
 
 const (
-	StateWelcome WorkflowState = iota
-	StateProviders
+	StateProviders WorkflowState = iota
 	StateModels
 	StateRoles
 	StatePerformance
@@ -184,7 +181,7 @@ type Workflow struct {
 }
 
 func Start(existing config.Config, defaults []topology.Endpoint) *Workflow {
-	st := StateWelcome
+	st := StateProviders
 	if existing.IsReady() {
 		st = StateReady
 	}
@@ -192,11 +189,9 @@ func Start(existing config.Config, defaults []topology.Endpoint) *Workflow {
 }
 func (w *Workflow) Continue() error {
 	switch w.State {
-	case StateWelcome:
-		w.State = StateProviders
 	case StateProviders:
-		if len(w.Draft.Catalog()) == 0 {
-			return fmt.Errorf("at least one model is required")
+		if !w.Draft.Config.Providers.AnyEnabled() {
+			return fmt.Errorf("enable at least one provider")
 		}
 		w.State = StateModels
 	case StateModels:
@@ -210,6 +205,9 @@ func (w *Workflow) Continue() error {
 	case StateRoles:
 		if !w.Draft.Config.Topology.Roles.King.Complete() || !w.Draft.Config.Topology.Roles.Worker.Complete() {
 			return fmt.Errorf("king and worker assignments are required")
+		}
+		if w.Draft.Config.CouncilEnabled && !w.Draft.Config.Topology.Roles.Council.Complete() {
+			return fmt.Errorf("assign a council model or disable the council")
 		}
 		w.State = StatePerformance
 	case StatePerformance:
@@ -226,8 +224,6 @@ func (w *Workflow) Back() {
 		w.State = StateModels
 	} else if w.State == StateModels {
 		w.State = StateProviders
-	} else if w.State == StateProviders {
-		w.State = StateWelcome
 	}
 }
 func (w *Workflow) Save(ctx context.Context, save func(config.Config) error) error {

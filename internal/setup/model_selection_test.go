@@ -73,6 +73,7 @@ func TestWorkflowIncludesModelsBetweenProvidersAndRoles(t *testing.T) {
 
 func selectionDraft() Draft {
 	draft := NewDraft(config.Default(), nil)
+	draft.Config.Providers.Ollama.Enabled = true
 	draft.ApplyResults([]EndpointResult{
 		{
 			Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"},

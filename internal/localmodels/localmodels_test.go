@@ -59,25 +59,16 @@ func (d fakeDiscoverer) Discover(_ context.Context, endpoints []topology.Endpoin
 func TestInspectReportsStableProvidersWithoutLaunchingAnything(t *testing.T) {
 	cache := createCachedMLXModel(t, "mlx-community", "Qwen-4bit")
 	system := &fakeSystem{
-		paths: map[string]string{"ollama": "/bin/ollama", "lms": "/bin/lms", "mlx_lm.server": "/bin/mlx_lm.server"},
-		outputs: map[string][]byte{
-			"/bin/lms ls --llm --json --no-launch": []byte(`[
-				{"modelKey":"zeta/model"},
-				{"modelKey":" alpha/model "},
-				{"modelKey":"alpha/model"},
-				{"modelKey":""}
-			]`),
-		},
+		paths: map[string]string{"ollama": "/bin/ollama", "mlx_lm.server": "/bin/mlx_lm.server"},
 	}
 	discoverer := fakeDiscoverer{results: map[string]discovery.Result{
-		"ollama-local":    {Models: []discovery.Model{{ID: "gemma3"}}},
-		"lm-studio-local": {Err: errors.New("connection refused")},
-		"mlx-local":       {Err: errors.New("connection refused")},
+		"ollama-local": {Models: []discovery.Model{{ID: "gemma3"}}},
+		"mlx-local":    {Err: errors.New("connection refused")},
 	}}
 
 	runtimes := New(system, discoverer, cache).Inspect(context.Background())
 
-	if len(runtimes) != 3 || runtimes[0].Kind != KindOllama || runtimes[1].Kind != KindLMStudio || runtimes[2].Kind != KindMLX {
+	if len(runtimes) != 2 || runtimes[0].Kind != KindOllama || runtimes[1].Kind != KindMLX {
 		t.Fatalf("runtime order=%+v", runtimes)
 	}
 	for _, runtime := range runtimes {
@@ -88,39 +79,28 @@ func TestInspectReportsStableProvidersWithoutLaunchingAnything(t *testing.T) {
 	if !runtimes[0].Installed || !runtimes[0].Running || !reflect.DeepEqual(runtimes[0].Models, []Model{{ID: "gemma3", Loaded: true}}) {
 		t.Fatalf("Ollama=%+v", runtimes[0])
 	}
-	if !runtimes[1].Installed || runtimes[1].Running || !reflect.DeepEqual(runtimes[1].Models, []Model{{ID: "alpha/model"}, {ID: "zeta/model"}}) {
-		t.Fatalf("LM Studio=%+v", runtimes[1])
-	}
-	if !runtimes[2].Installed || runtimes[2].Running || len(runtimes[2].Models) != 1 || runtimes[2].Models[0].ID != "mlx-community/Qwen-4bit" || runtimes[2].Models[0].LocalPath == "" {
-		t.Fatalf("MLX=%+v", runtimes[2])
+	if !runtimes[1].Installed || runtimes[1].Running || len(runtimes[1].Models) != 1 || runtimes[1].Models[0].ID != "mlx-community/Qwen-4bit" || runtimes[1].Models[0].LocalPath == "" {
+		t.Fatalf("MLX=%+v", runtimes[1])
 	}
 	if len(system.started) != 0 {
 		t.Fatalf("inspection launched processes: %+v", system.started)
 	}
 }
 
-func TestInspectHandlesMissingCLIsMalformedOutputAndPartialProviders(t *testing.T) {
-	system := &fakeSystem{paths: map[string]string{"lms": "/bin/lms"}, outputs: map[string][]byte{"/bin/lms ls --llm --json --no-launch": []byte(`{"not":"an array"}`)}}
+func TestInspectHandlesMissingCLIs(t *testing.T) {
+	system := &fakeSystem{}
 	runtimes := New(system, fakeDiscoverer{results: map[string]discovery.Result{}}, t.TempDir()).Inspect(context.Background())
-	if runtimes[0].Installed || !runtimes[1].Installed || runtimes[2].Installed {
+	if len(runtimes) != 2 || runtimes[0].Installed || runtimes[1].Installed {
 		t.Fatalf("installed flags=%+v", runtimes)
-	}
-	if runtimes[1].Warning == "" {
-		t.Fatalf("malformed LM Studio output was hidden: %+v", runtimes[1])
 	}
 }
 
 func TestStartUsesArgumentVectorsAndOfflineMLX(t *testing.T) {
 	cache := createCachedMLXModel(t, "mlx-community", "Qwen-4bit")
-	system := &fakeSystem{paths: map[string]string{"ollama": "/tools/ollama", "lms": "/tools/lms", "mlx_lm.server": "/tools/mlx_lm.server"}, outputs: map[string][]byte{
-		"/tools/lms ls --llm --json --no-launch": []byte(`[{"modelKey":"alpha/model"}]`),
-	}}
+	system := &fakeSystem{paths: map[string]string{"ollama": "/tools/ollama", "mlx_lm.server": "/tools/mlx_lm.server"}}
 	manager := New(system, fakeDiscoverer{results: map[string]discovery.Result{}}, cache)
 
 	if err := manager.Start(context.Background(), KindOllama, ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Start(context.Background(), KindLMStudio, "alpha/model"); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Start(context.Background(), KindMLX, "mlx-community/Qwen-4bit"); err != nil {
@@ -134,25 +114,20 @@ func TestStartUsesArgumentVectorsAndOfflineMLX(t *testing.T) {
 	if !reflect.DeepEqual(system.started, wantStarted) {
 		t.Fatalf("started=%+v want=%+v", system.started, wantStarted)
 	}
-	wantRun := []commandCall{
-		{name: "/tools/lms", args: []string{"ls", "--llm", "--json", "--no-launch"}},
-		{name: "/tools/lms", args: []string{"server", "start", "--port", "1234", "--bind", "127.0.0.1"}},
-		{name: "/tools/lms", args: []string{"load", "alpha/model", "--identifier", "alpha/model", "-y"}},
-	}
-	if !reflect.DeepEqual(system.run, wantRun) {
-		t.Fatalf("run=%+v want=%+v", system.run, wantRun)
+	if len(system.run) != 0 {
+		t.Fatalf("unexpected synchronous commands: %+v", system.run)
 	}
 }
 
 func TestStartRejectsMissingInstallAndUnknownOrUnsafeModels(t *testing.T) {
 	cache := createCachedMLXModel(t, "safe", "model")
-	manager := New(&fakeSystem{paths: map[string]string{"lms": "/bin/lms", "mlx_lm.server": "/bin/mlx_lm.server"}, outputs: map[string][]byte{}}, fakeDiscoverer{}, cache)
+	manager := New(&fakeSystem{paths: map[string]string{"mlx_lm.server": "/bin/mlx_lm.server"}, outputs: map[string][]byte{}}, fakeDiscoverer{}, cache)
 	for _, item := range []struct {
 		kind  Kind
 		model string
 	}{
 		{KindOllama, ""},
-		{KindLMStudio, ""},
+		{Kind("unsupported"), ""},
 		{KindMLX, "../../outside"},
 		{KindMLX, "unknown/model"},
 		{"unknown", "model"},

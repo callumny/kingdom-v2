@@ -1,19 +1,9 @@
 package app
 
 import (
-	"fmt"
-
 	tea "charm.land/bubbletea/v2"
+	"github.com/callumny/kingdom/internal/setup"
 )
-
-func (m Model) handleWelcomeKey(key string) (tea.Model, tea.Cmd) {
-	if key == "enter" {
-		if err := m.workflow.Continue(); err == nil {
-			m.screen = m.workflow.State
-		}
-	}
-	return m, nil
-}
 
 func (m Model) handleProvidersKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
@@ -25,21 +15,22 @@ func (m Model) handleProvidersKey(key string) (tea.Model, tea.Cmd) {
 		if m.providerCursor+1 < len(m.workflow.Draft.Results) {
 			m.providerCursor++
 		}
+	case " ", "space":
+		if m.providerCursor >= 0 && m.providerCursor < len(m.workflow.Draft.Results) {
+			id := m.workflow.Draft.Results[m.providerCursor].Endpoint.ID
+			enabled := !m.workflow.Draft.ProviderEnabled(id)
+			m.workflow.Err = m.workflow.Draft.SetProviderEnabled(id, enabled, setup.CurrentPlatform())
+		}
 	case "enter":
 		if m.scanning {
-			return m, nil
-		}
-		if len(m.workflow.Draft.Catalog()) == 0 {
-			if m.localModels.manager != nil {
-				return m, m.openLocalModels()
-			}
-			m.workflow.Err = fmt.Errorf("set up at least one provider with an available model")
 			return m, nil
 		}
 		m.workflow.Err = nil
 		if err := m.workflow.Continue(); err == nil {
 			m.gate.Cancel()
 			m.screen = m.workflow.State
+		} else {
+			m.workflow.Err = err
 		}
 	}
 	return m, nil

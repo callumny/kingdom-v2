@@ -1,6 +1,6 @@
 # ADR 0011: Multi-provider model selection
 
-Status: accepted
+Status: superseded by ADR 0012
 
 ## Decision
 

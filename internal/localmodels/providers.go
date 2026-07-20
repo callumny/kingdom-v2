@@ -2,7 +2,6 @@ package localmodels
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -47,71 +46,6 @@ func (p *ollamaProvider) start(_ context.Context, modelID string) error {
 	}
 	if err := p.system.Start(executable, []string{"serve"}, nil); err != nil {
 		return fmt.Errorf("start Ollama: %w", err)
-	}
-	return nil
-}
-
-type lmStudioProvider struct {
-	system     System
-	discoverer Discoverer
-	endpoint   topology.Endpoint
-}
-
-func (*lmStudioProvider) kind() Kind { return KindLMStudio }
-
-func (p *lmStudioProvider) inspect(ctx context.Context) Runtime {
-	result := Runtime{Kind: p.kind(), Name: "LM Studio", Endpoint: p.endpoint, InstallHint: "Install LM Studio and run it once to enable the lms CLI"}
-	executable, err := p.system.LookPath("lms")
-	if err != nil || executable == "" {
-		return result
-	}
-	result.Installed = true
-	models, listErr := p.list(ctx, executable)
-	running, loaded, probeErr := probe(ctx, p.discoverer, p.endpoint)
-	result.Running = running
-	result.Models = normalizedModels(markLoaded(models, loaded))
-	result.Warning = combineWarnings(listErr, probeErr)
-	return result
-}
-
-func (p *lmStudioProvider) list(ctx context.Context, executable string) ([]Model, error) {
-	output, err := p.system.Output(ctx, executable, "ls", "--llm", "--json", "--no-launch")
-	if err != nil {
-		return nil, fmt.Errorf("list LM Studio models: %w", err)
-	}
-	var raw []struct {
-		ModelKey string `json:"modelKey"`
-	}
-	if err := json.Unmarshal(output, &raw); err != nil {
-		return nil, fmt.Errorf("decode LM Studio models: %w", err)
-	}
-	models := make([]Model, 0, len(raw))
-	for _, item := range raw {
-		models = append(models, Model{ID: item.ModelKey})
-	}
-	return normalizedModels(models), nil
-}
-
-func (p *lmStudioProvider) start(ctx context.Context, modelID string) error {
-	if modelID == "" {
-		return errors.New("select an installed LM Studio model")
-	}
-	executable, err := p.system.LookPath("lms")
-	if err != nil {
-		return errors.New("LM Studio CLI is not installed")
-	}
-	models, err := p.list(ctx, executable)
-	if err != nil {
-		return err
-	}
-	if !containsModel(models, modelID) {
-		return fmt.Errorf("LM Studio model %q is not installed", modelID)
-	}
-	if _, err := p.system.Output(ctx, executable, "server", "start", "--port", "1234", "--bind", "127.0.0.1"); err != nil {
-		return fmt.Errorf("start LM Studio server: %w", err)
-	}
-	if _, err := p.system.Output(ctx, executable, "load", modelID, "--identifier", modelID, "-y"); err != nil {
-		return fmt.Errorf("load LM Studio model: %w", err)
 	}
 	return nil
 }

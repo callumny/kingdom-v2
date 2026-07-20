@@ -14,23 +14,69 @@ import (
 // Config is the persisted application configuration.
 type Config struct {
 	Version           int               `json:"version"`
+	Providers         Providers         `json:"providers"`
+	CouncilEnabled    bool              `json:"council_enabled"`
 	CouncilSize       int               `json:"council_size"`
 	WorkerConcurrency int               `json:"worker_concurrency"`
 	Topology          topology.Topology `json:"topology"`
 }
 
 // CurrentVersion is the supported on-disk schema version.
-const CurrentVersion = 1
+const CurrentVersion = 2
+
+type OllamaPortMode string
+
+const (
+	OllamaDedicatedPorts OllamaPortMode = "dedicated"
+	OllamaSharedPort     OllamaPortMode = "shared"
+)
+
+type Provider struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
+}
+
+type OllamaProvider struct {
+	Enabled  bool           `json:"enabled"`
+	Port     int            `json:"port"`
+	PortMode OllamaPortMode `json:"port_mode"`
+}
+
+type Providers struct {
+	Ollama OllamaProvider `json:"ollama"`
+	MLX    Provider       `json:"mlx"`
+}
+
+func (p Providers) AnyEnabled() bool { return p.Ollama.Enabled || p.MLX.Enabled }
 
 // Default returns setup-safe default configuration.
 func Default() Config {
-	return Config{Version: CurrentVersion, CouncilSize: 3, WorkerConcurrency: 4, Topology: topology.Default()}
+	return Config{
+		Version:           CurrentVersion,
+		CouncilEnabled:    true,
+		CouncilSize:       3,
+		WorkerConcurrency: 4,
+		Providers: Providers{
+			Ollama: OllamaProvider{Port: 11434, PortMode: OllamaDedicatedPorts},
+			MLX:    Provider{Port: 8080},
+		},
+		Topology: topology.Default(),
+	}
 }
 
 // Validate checks schema, bounds, and topology structure.
 func (c Config) Validate() error {
 	if c.Version != CurrentVersion {
 		return fmt.Errorf("unsupported config version %d", c.Version)
+	}
+	if c.Providers.Ollama.Port < 1 || c.Providers.Ollama.Port > 65535 {
+		return fmt.Errorf("Ollama port must be 1..65535")
+	}
+	if c.Providers.MLX.Port < 1 || c.Providers.MLX.Port > 65535 {
+		return fmt.Errorf("MLX port must be 1..65535")
+	}
+	if c.Providers.Ollama.PortMode != OllamaDedicatedPorts && c.Providers.Ollama.PortMode != OllamaSharedPort {
+		return fmt.Errorf("Ollama port mode must be %q or %q", OllamaDedicatedPorts, OllamaSharedPort)
 	}
 	if c.CouncilSize < 1 || c.CouncilSize > 9 {
 		return fmt.Errorf("council size must be 1..9")
@@ -42,7 +88,12 @@ func (c Config) Validate() error {
 }
 
 // IsReady reports whether configuration is valid and has required assignments.
-func (c Config) IsReady() bool { return c.Validate() == nil && c.Topology.IsReady() }
+func (c Config) IsReady() bool {
+	if c.Validate() != nil || !c.Providers.AnyEnabled() || !c.Topology.IsReady() {
+		return false
+	}
+	return !c.CouncilEnabled || c.Topology.Roles.Council.Complete()
+}
 
 // RequiresSetup reports whether the application should present initial setup UI.
 func (c Config) RequiresSetup() bool { return !c.IsReady() }
@@ -66,10 +117,43 @@ func Load(path string) (Config, error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return Config{}, fmt.Errorf("invalid config JSON: trailing data")
 	}
+	if err := migrate(&c); err != nil {
+		return Config{}, fmt.Errorf("invalid config: %w", err)
+	}
 	if err := c.Validate(); err != nil {
 		return Config{}, fmt.Errorf("invalid config: %w", err)
 	}
 	return c, nil
+}
+
+func migrate(c *Config) error {
+	if c.Version == CurrentVersion {
+		return nil
+	}
+	if c.Version != 1 {
+		return fmt.Errorf("unsupported config version %d", c.Version)
+	}
+
+	defaults := Default()
+	c.Version = CurrentVersion
+	c.Providers = defaults.Providers
+	c.CouncilEnabled = true
+	for _, endpoint := range c.Topology.Endpoints {
+		switch endpoint.ID {
+		case "mlx-local":
+			c.Providers.MLX.Enabled = true
+		case "ollama-local":
+			c.Providers.Ollama.Enabled = true
+		default:
+			if endpoint.Kind == topology.KindOllama {
+				c.Providers.Ollama.Enabled = true
+			}
+		}
+	}
+	if c.Topology.Roles.Council.Empty() && c.Topology.Roles.King.Complete() {
+		c.Topology.Roles.Council = c.Topology.Roles.King
+	}
+	return nil
 }
 
 // Save validates and atomically replaces path using a same-directory temporary file.

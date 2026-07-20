@@ -38,8 +38,7 @@ func (m *fakeLocalModelManager) StartAndWait(_ context.Context, kind localmodels
 func runtimeFixtures() []localmodels.Runtime {
 	return []localmodels.Runtime{
 		{Kind: localmodels.KindOllama, Name: "Ollama", Installed: true, Running: false, Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://localhost:11434"}},
-		{Kind: localmodels.KindLMStudio, Name: "LM Studio", Installed: true, Running: true, Models: []localmodels.Model{{ID: "alpha", Loaded: true}, {ID: "beta"}}, Endpoint: topology.Endpoint{ID: "lm-studio-local", Name: "LM Studio", Kind: topology.KindOpenAICompatible, BaseURL: "http://localhost:1234/v1"}},
-		{Kind: localmodels.KindMLX, Name: "MLX", Installed: false, Endpoint: topology.Endpoint{ID: "mlx-local", Name: "MLX", Kind: topology.KindOpenAICompatible, BaseURL: "http://localhost:8080/v1"}},
+		{Kind: localmodels.KindMLX, Name: "MLX", Installed: true, Running: true, Models: []localmodels.Model{{ID: "alpha", Loaded: true}, {ID: "beta"}}, Endpoint: topology.Endpoint{ID: "mlx-local", Name: "MLX", Kind: topology.KindOpenAICompatible, BaseURL: "http://localhost:8080/v1"}},
 	}
 }
 
@@ -52,7 +51,7 @@ func TestControlROpensLocalModelsAndKeepsKeysOutOfChat(t *testing.T) {
 	}
 	m, _ = update(m, command())
 	view := m.View().Content
-	for _, expected := range []string{"Local Models", "Ollama", "LM Studio", "MLX", "running", "not installed"} {
+	for _, expected := range []string{"Local Models", "Ollama", "MLX", "running"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("view missing %q: %s", expected, view)
 		}
@@ -73,25 +72,20 @@ func TestControlROpensLocalModelsAndKeepsKeysOutOfChat(t *testing.T) {
 }
 
 func TestDiscoveryGuidesEmptySetupIntoLocalModels(t *testing.T) {
-	for _, pressed := range []string{"enter", "m"} {
-		t.Run(pressed, func(t *testing.T) {
-			manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
-			m := NewWithServices(config.Default(), Services{LocalModels: manager})
-			m.workflow.Draft.ApplyResults([]setup.EndpointResult{{
-				Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"},
-				Err:      errors.New("connection refused"),
-			}})
+	manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
+	m := NewWithServices(config.Default(), Services{LocalModels: manager})
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{
+		Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"},
+		Err:      errors.New("connection refused"),
+	}})
 
-			m, _ = update(m, key("enter")) // welcome -> providers
-			m, inspect := update(m, key(pressed))
-			if !m.localModels.open || inspect == nil {
-				t.Fatalf("%s did not open local model setup", pressed)
-			}
-			m, _ = update(m, inspect())
-			if len(m.localModels.runtimes) != len(runtimeFixtures()) {
-				t.Fatalf("runtime inspection missing: %+v", m.localModels.runtimes)
-			}
-		})
+	m, inspect := update(m, key("m"))
+	if !m.localModels.open || inspect == nil {
+		t.Fatal("m did not open local model setup")
+	}
+	m, _ = update(m, inspect())
+	if len(m.localModels.runtimes) != len(runtimeFixtures()) {
+		t.Fatalf("runtime inspection missing: %+v", m.localModels.runtimes)
 	}
 }
 
@@ -124,7 +118,7 @@ func TestLocalModelStartRequiresConfirmationAndRefreshes(t *testing.T) {
 	}
 }
 
-func TestLocalModelNavigationLoadsSelectedLMStudioModel(t *testing.T) {
+func TestLocalModelNavigationLoadsSelectedMLXModel(t *testing.T) {
 	manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
 	m := NewWithServices(completeConfig(), Services{LocalModels: manager})
 	m, inspect := update(m, key("ctrl+r"))
@@ -134,7 +128,7 @@ func TestLocalModelNavigationLoadsSelectedLMStudioModel(t *testing.T) {
 	m, _ = update(m, key("s"))
 	m, start := update(m, key("y"))
 	m, _ = update(m, start())
-	if len(manager.starts) != 1 || manager.starts[0].kind != localmodels.KindLMStudio || manager.starts[0].model != "beta" {
+	if len(manager.starts) != 1 || manager.starts[0].kind != localmodels.KindMLX || manager.starts[0].model != "beta" {
 		t.Fatalf("starts=%+v", manager.starts)
 	}
 }
@@ -147,7 +141,7 @@ func TestReadyModelReturnsToSetupAndFocusesModelSelection(t *testing.T) {
 		return func() tea.Msg {
 			return DiscoveryMsg{Generation: gen, Results: []setup.EndpointResult{
 				{Endpoint: topology.Endpoint{ID: "ollama-local", Name: "Ollama"}, Models: []discovery.Model{{ID: "gemma"}}},
-				{Endpoint: topology.Endpoint{ID: "lm-studio-local", Name: "LM Studio"}, Models: []discovery.Model{{ID: "alpha"}, {ID: "beta"}}},
+				{Endpoint: topology.Endpoint{ID: "mlx-local", Name: "MLX"}, Models: []discovery.Model{{ID: "alpha"}, {ID: "beta"}}},
 			}}
 		}
 	}
@@ -156,11 +150,11 @@ func TestReadyModelReturnsToSetupAndFocusesModelSelection(t *testing.T) {
 	m, _ = update(m, inspect())
 	m, _ = update(m, key("right"))
 	m, command := update(m, key("enter"))
-	if m.localModels.open || !m.setup || m.screen != setup.StateWelcome || command == nil || generation == 0 {
+	if m.localModels.open || !m.setup || m.screen != setup.StateProviders || command == nil || generation == 0 {
 		t.Fatalf("did not enter setup discovery: setup=%v screen=%v", m.setup, m.screen)
 	}
 	m, _ = update(m, command())
-	if m.screen != setup.StateWelcome || m.modelCursor != 1 {
+	if m.screen != setup.StateProviders || m.modelCursor != 1 {
 		t.Fatalf("ready model did not preserve setup or focus: screen=%v cursor=%d", m.screen, m.modelCursor)
 	}
 }
@@ -203,7 +197,7 @@ func TestLocalModelBrowserIgnoresStaleInspection(t *testing.T) {
 		t.Fatalf("stale inspection applied: %+v", m.localModels)
 	}
 	m, _ = update(m, currentCommand())
-	if len(m.localModels.runtimes) != 3 || m.localModels.loading {
+	if len(m.localModels.runtimes) != 2 || m.localModels.loading {
 		t.Fatalf("current inspection missing: %+v", m.localModels)
 	}
 }

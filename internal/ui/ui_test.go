@@ -12,17 +12,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestWelcomeExplainsLocalModelsAndTradeoffs(t *testing.T) {
-	w := &setup.Workflow{State: setup.StateWelcome, Draft: setup.NewDraft(config.Default(), discovery.DefaultEndpoints())}
+func TestProvidersExplainLocalModelsAndTradeoffs(t *testing.T) {
+	w := &setup.Workflow{State: setup.StateProviders, Draft: setup.NewDraft(config.Default(), discovery.DefaultEndpoints())}
 	view := ViewWithPresentation(100, 32, true, w, Presentation{Scanning: true}).Content
 	for _, want := range []string{
-		"Welcome to Kingdom",
 		"entirely on your machine",
-		"up to three",
-		"Larger models",
-		"more RAM",
-		"Smaller models",
-		"Enter",
+		"Ollama",
+		"MLX",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("welcome missing %q: %s", want, view)
@@ -45,10 +41,10 @@ func TestProviderViewHasProgressStatusAndContextualHelp(t *testing.T) {
 		"Set up model providers",
 		"Ollama",
 		"2 models",
-		"LM Studio",
+		"MLX",
 		"Unavailable",
-		"Enter View models",
-		"Manage providers",
+		"Space Toggle",
+		"Enter Continue",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("providers missing %q: %s", want, view)
@@ -161,12 +157,12 @@ func TestPresentationRendererStates(t *testing.T) {
 	}
 	roles := *w
 	roles.State = setup.StateRoles
-	roles.Draft.CouncilUseKing = true
+	roles.Draft.Config.CouncilEnabled = false
 	if err := roles.Draft.ToggleModel(setup.ModelRef{EndpointID: "e1", ModelID: "m1"}); err != nil {
 		t.Fatal(err)
 	}
 	s := ViewWithPresentation(80, 40, true, &roles, Presentation{ModelIndex: 0, Role: 1}).Content
-	for _, want := range []string{"Editing: Worker", "ep / m1", "uses King"} {
+	for _, want := range []string{"Editing: Worker", "ep / m1", "disabled"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
@@ -198,7 +194,7 @@ func TestProviderViewGuidesUnavailableModelSetup(t *testing.T) {
 		Err:      errInvalidForTest{},
 	}}}}
 	view := ViewWithPresentation(100, 40, true, w, Presentation{}).Content
-	for _, want := range []string{"Set up model providers", "m Manage providers", "Unavailable"} {
+	for _, want := range []string{"Set up model providers", "Space Toggle", "Unavailable"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("discovery guidance missing %q: %s", want, view)
 		}
@@ -209,9 +205,9 @@ func TestReviewRendersExactDraftSummary(t *testing.T) {
 	w := &setup.Workflow{State: setup.StateReview, Draft: setup.Draft{Config: config.Default(), Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "unused", Name: "Unused", BaseURL: "u"}}}}}
 	w.Draft.Config.Topology.Roles.King = topology.Assignment{EndpointID: "king", Model: "km"}
 	w.Draft.Config.Topology.Roles.Worker = topology.Assignment{EndpointID: "worker", Model: "wm"}
-	w.Draft.CouncilUseKing = true
+	w.Draft.Config.CouncilEnabled = false
 	s := ViewWithPresentation(80, 40, true, w, Presentation{PreviousEndpoints: []topology.Endpoint{{ID: "offline", Name: "Offline", BaseURL: "o"}}}).Content
-	for _, want := range []string{"King: king/km", "Worker: worker/wm", "Council: uses King", "Council size", "Worker concurrency", "Offline"} {
+	for _, want := range []string{"King: king/km", "Worker: worker/wm", "Council: disabled", "Council size", "Worker concurrency", "Offline"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q", want)
 		}

@@ -26,8 +26,9 @@ func TestSetupSavesRolesAcrossOllamaAndMLX(t *testing.T) {
 	defaults := []topology.Endpoint{results[0].Endpoint, results[1].Endpoint}
 	m := NewWithDepsAndSave(configuration, defaults, nil, func(c config.Config) error { return config.Save(path, c) })
 	m.workflow.Draft.ApplyResults(results)
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m.workflow.Draft.Config.Providers.MLX.Enabled = true
 
-	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("down"))

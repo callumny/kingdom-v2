@@ -14,7 +14,7 @@ func TestModelsScreenSelectsAcrossProviders(t *testing.T) {
 	m := New(config.Default())
 	m.workflow.Draft.ApplyResults(crossProviderResults())
 
-	m, _ = update(m, key("enter")) // welcome -> providers
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m, _ = update(m, key("enter")) // providers -> models
 	if m.screen != setup.StateModels {
 		t.Fatalf("screen=%v, want models", m.screen)
@@ -32,17 +32,18 @@ func TestModelsScreenSelectsAcrossProviders(t *testing.T) {
 	}
 }
 
-func TestProviderScreenDoesNotFilterModelProviders(t *testing.T) {
+func TestProviderScreenRequiresAnExplicitProviderChoice(t *testing.T) {
 	m := New(config.Default())
 	m.workflow.Draft.ApplyResults(onboardingResults())
 	m, _ = update(m, key("enter"))
 	view := m.View().Content
-	if strings.Contains(view, "[✓]") || strings.Contains(view, "Space Toggle") {
-		t.Fatalf("provider screen still exposes provider selection: %s", view)
+	if m.screen != setup.StateProviders || !strings.Contains(view, "enable at least one provider") {
+		t.Fatalf("provider screen advanced without a choice: %s", view)
 	}
+	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
 	view = m.View().Content
-	for _, want := range []string{"ollama-model", "lm-model-a", "lm-model-b"} {
+	for _, want := range []string{"ollama-model", "mlx-model-a", "mlx-model-b"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("models view missing %q: %s", want, view)
 		}

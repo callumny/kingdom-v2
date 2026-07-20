@@ -11,15 +11,13 @@ import (
 
 func TestOnboardingStartsAtWelcomeThenProviders(t *testing.T) {
 	w := Start(config.Default(), discovery.DefaultEndpoints())
-	if w.State != StateWelcome {
-		t.Fatalf("initial state=%v, want welcome", w.State)
-	}
-	if err := w.Continue(); err != nil || w.State != StateProviders {
-		t.Fatalf("welcome continue: state=%v err=%v", w.State, err)
+	if w.State != StateProviders {
+		t.Fatalf("initial state=%v, want providers", w.State)
 	}
 	if err := w.Continue(); err == nil || w.State != StateProviders {
-		t.Fatalf("providers advanced without models: state=%v err=%v", w.State, err)
+		t.Fatalf("providers advanced without an enabled provider: state=%v err=%v", w.State, err)
 	}
+	w.Draft.Config.Providers.Ollama.Enabled = true
 	w.Draft.ApplyResults([]EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0], Models: []discovery.Model{{ID: "model"}}}})
 	if err := w.Continue(); err != nil || w.State != StateModels {
 		t.Fatalf("providers continue: state=%v err=%v", w.State, err)
@@ -39,8 +37,8 @@ func TestOnboardingStartsAtWelcomeThenProviders(t *testing.T) {
 		t.Fatalf("models back=%v, want providers", w.State)
 	}
 	w.Back()
-	if w.State != StateWelcome {
-		t.Fatalf("providers back=%v, want welcome", w.State)
+	if w.State != StateProviders {
+		t.Fatalf("providers back=%v, want providers", w.State)
 	}
 }
 

@@ -29,21 +29,21 @@ func TestRoleSuggestionsUseLargestForKingAndSmallestForWorker(t *testing.T) {
 	if roles.Worker != (topology.Assignment{EndpointID: "ollama-local", Model: "small"}) {
 		t.Fatalf("worker=%+v", roles.Worker)
 	}
-	if roles.Council != (topology.Assignment{EndpointID: "ollama-local", Model: "medium"}) || draft.CouncilUseKing {
-		t.Fatalf("council=%+v fallback=%v", roles.Council, draft.CouncilUseKing)
+	if roles.Council != (topology.Assignment{EndpointID: "ollama-local", Model: "medium"}) || !draft.Config.CouncilEnabled {
+		t.Fatalf("council=%+v enabled=%v", roles.Council, draft.Config.CouncilEnabled)
 	}
 }
 
 func TestRoleSuggestionsHandleOneAndTwoModels(t *testing.T) {
 	tests := []struct {
-		name     string
-		refs     []ModelRef
-		king     string
-		worker   string
-		fallback bool
+		name           string
+		refs           []ModelRef
+		king           string
+		worker         string
+		councilEnabled bool
 	}{
-		{name: "one", refs: []ModelRef{{EndpointID: "ollama-local", ModelID: "small"}}, king: "small", worker: "small", fallback: true},
-		{name: "two", refs: []ModelRef{{EndpointID: "ollama-local", ModelID: "small"}, {EndpointID: "mlx-local", ModelID: "large"}}, king: "large", worker: "small", fallback: true},
+		{name: "one", refs: []ModelRef{{EndpointID: "ollama-local", ModelID: "small"}}, king: "small", worker: "small"},
+		{name: "two", refs: []ModelRef{{EndpointID: "ollama-local", ModelID: "small"}, {EndpointID: "mlx-local", ModelID: "large"}}, king: "large", worker: "small"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,8 +54,8 @@ func TestRoleSuggestionsHandleOneAndTwoModels(t *testing.T) {
 			if err := draft.ApplyRoleSuggestions(); err != nil {
 				t.Fatal(err)
 			}
-			if draft.Config.Topology.Roles.King.Model != tt.king || draft.Config.Topology.Roles.Worker.Model != tt.worker || draft.CouncilUseKing != tt.fallback {
-				t.Fatalf("roles=%+v fallback=%v", draft.Config.Topology.Roles, draft.CouncilUseKing)
+			if draft.Config.Topology.Roles.King.Model != tt.king || draft.Config.Topology.Roles.Worker.Model != tt.worker || draft.Config.CouncilEnabled != tt.councilEnabled {
+				t.Fatalf("roles=%+v council enabled=%v", draft.Config.Topology.Roles, draft.Config.CouncilEnabled)
 			}
 		})
 	}
@@ -69,7 +69,7 @@ func TestRoleSuggestionsPreserveValidExistingAssignments(t *testing.T) {
 	}
 	draft.AssignKing(refs[0].Assignment())
 	draft.AssignWorker(refs[1].Assignment())
-	draft.UseKingForCouncil(true)
+	draft.SetCouncilEnabled(false)
 
 	if err := draft.ApplyRoleSuggestions(); err != nil {
 		t.Fatal(err)

@@ -76,9 +76,11 @@ func TestDefaultPath(t *testing.T) {
 }
 func complete() Config {
 	c := Default()
+	c.Providers.Ollama.Enabled = true
 	c.Topology.Endpoints = []topology.Endpoint{{ID: "local", Name: "Local", Kind: topology.KindOllama, BaseURL: "http://localhost"}}
 	c.Topology.Roles.King = topology.Assignment{EndpointID: "local", Model: "k"}
 	c.Topology.Roles.Worker = topology.Assignment{EndpointID: "local", Model: "w"}
+	c.Topology.Roles.Council = c.Topology.Roles.King
 	return c
 }
 func TestStoreRoundTripAndMissing(t *testing.T) {
@@ -131,7 +133,7 @@ func TestVersionAndAssignments(t *testing.T) {
 	if c.Version != CurrentVersion || c.Validate() != nil {
 		t.Fatal("current version should validate")
 	}
-	c.Version = 2
+	c.Version = CurrentVersion + 1
 	if err := c.Validate(); err == nil {
 		t.Fatal("unknown version")
 	}
@@ -182,5 +184,73 @@ func TestSaveCreatesRestrictedDirectory(t *testing.T) {
 	}
 	if info, err := os.Stat(p); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("file mode: %v %v", info, err)
+	}
+}
+
+func TestSetupDefaultsAreExplicit(t *testing.T) {
+	c := Default()
+	if c.Providers.Ollama.Enabled || c.Providers.MLX.Enabled {
+		t.Fatalf("providers should require an explicit choice: %+v", c.Providers)
+	}
+	if c.Providers.Ollama.Port != 11434 || c.Providers.MLX.Port != 8080 {
+		t.Fatalf("provider ports: %+v", c.Providers)
+	}
+	if c.Providers.Ollama.PortMode != OllamaDedicatedPorts {
+		t.Fatalf("Ollama port mode=%q, want %q", c.Providers.Ollama.PortMode, OllamaDedicatedPorts)
+	}
+	if !c.CouncilEnabled {
+		t.Fatal("council should be offered by default")
+	}
+}
+
+func TestCouncilReadinessIsAnExplicitChoice(t *testing.T) {
+	c := complete()
+	c.Providers.Ollama.Enabled = true
+	c.CouncilEnabled = false
+	c.Topology.Roles.Council = topology.Assignment{}
+	if !c.IsReady() {
+		t.Fatal("disabled council should not require a council model")
+	}
+
+	c.CouncilEnabled = true
+	if c.IsReady() {
+		t.Fatal("enabled council should require a council model")
+	}
+	c.Topology.Roles.Council = c.Topology.Roles.King
+	if !c.IsReady() {
+		t.Fatal("enabled council with an assignment should be ready")
+	}
+}
+
+func TestLoadMigratesVersionOneWithoutChangingItsMeaning(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	raw := `{
+  "version": 1,
+  "council_size": 3,
+  "worker_concurrency": 4,
+  "topology": {
+    "endpoints": [{"id":"ollama-local","name":"Ollama","kind":"ollama","base_url":"http://localhost:11434"}],
+    "roles": {
+      "king":{"endpoint_id":"ollama-local","model":"large"},
+      "worker":{"endpoint_id":"ollama-local","model":"small"},
+      "council":{"endpoint_id":"","model":""}
+    }
+  }
+}`
+	if err := os.WriteFile(p, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Version != CurrentVersion || !c.Providers.Ollama.Enabled || c.Providers.Ollama.PortMode != OllamaDedicatedPorts {
+		t.Fatalf("migration defaults: %+v", c)
+	}
+	if !c.CouncilEnabled || c.Topology.Roles.Council != c.Topology.Roles.King {
+		t.Fatalf("legacy council fallback was not preserved: %+v", c.Topology.Roles)
+	}
+	if !c.IsReady() {
+		t.Fatal("a ready version-one config should remain ready")
 	}
 }

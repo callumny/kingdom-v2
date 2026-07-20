@@ -1,6 +1,6 @@
 # Kingdom
 
-Kingdom is a local-only terminal application for configuring a king, council, and workers; coordinating memory, permissioned tools, skills, and topology; and presenting that system in a TUI. It discovers already-running Ollama, LM Studio, and MLX-compatible endpoints, lets the user assign models to roles, and atomically saves the reviewed configuration. Starting and stopping model-server processes is deferred to a later milestone.
+Kingdom is a local-only terminal application for configuring a king, optional council, and workers; coordinating memory, permissioned tools, skills, and topology; and presenting that system in a TUI. Its supported model providers are Ollama on macOS or Linux and MLX on Apple silicon Macs. Windows support is deferred.
 
 ## Development
 
@@ -11,16 +11,11 @@ make check
 go run ./cmd/kingdom
 ```
 
-On first run, Kingdom explains the local-model setup while scanning in the background. Press `Enter`
-to inspect provider readiness; every ready provider automatically contributes its models. Continue to
-the Models screen, then use arrows and `Space` to select up to three models from any combination of
-Ollama, LM Studio, MLX, or custom local endpoints. Press `m` to inspect or start local model runtimes,
-`r` to rescan, and `a` to add a custom local endpoint. The role screen assigns only the selected models
-to King, Worker, and Council. Kingdom suggests the largest selected model for King, the smallest for
-Worker, and the remaining model for Council; every suggestion can be changed before saving.
-Press `q` on ordinary setup screens or `Ctrl+C` to exit; inside the custom endpoint form, `q` is normal
-text. While the reviewed configuration is being saved, keyboard input is briefly blocked until the
-atomic write succeeds or fails.
+On first run, Kingdom starts at Providers and scans in the background. Use arrows and `Space` to enable
+Ollama or MLX, then continue to Models and select up to three choices. The role screen suggests the
+largest selected model for King and the smallest for Worker. With three choices it suggests the middle
+model for Council; with fewer choices Council starts disabled. Every suggestion can be changed before
+the reviewed configuration is atomically saved.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
@@ -33,15 +28,14 @@ idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return
 and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
 reported without discarding an otherwise valid King response.
 
-Press `m` from setup discovery—or `Ctrl+R` while idle—to manage local models. Use `h`/`l` to choose
-Ollama, LM Studio, or MLX and `j`/`k` to choose an installed model. Press `s`, review the action, and
+Press `m` from setup discovery—or `Ctrl+R` while idle—to inspect local models. Use `h`/`l` to choose
+Ollama or MLX and `j`/`k` to choose an installed model. Press `s`, review the action, and
 press `y` to start it (`n` cancels). Kingdom waits for the loopback endpoint to become ready, then
 refreshes its model status. Press `Enter` on a ready model to reopen setup, rescan endpoints, and focus
 that model directly in role assignment.
 
-This version never downloads models, binds a server beyond loopback, or stops a process. Ollama can be
-started first and then refreshed to expose its installed models. LM Studio models come from
-`lms ls --llm --json --no-launch`; MLX models come only from complete snapshots already in the local
+This stage never downloads models, binds a server beyond loopback, or stops a process. Ollama can be
+started first and then refreshed to expose its installed models. MLX models come only from complete snapshots already in the local
 Hugging Face cache and are started with offline mode enforced. Processes intentionally continue after
 Kingdom exits.
 

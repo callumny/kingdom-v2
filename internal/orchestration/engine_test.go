@@ -30,7 +30,12 @@ func (f *fake) Chat(context.Context, topology.Endpoint, string, []modelapi.Messa
 }
 func (f *fake) count() int { f.mu.Lock(); defer f.mu.Unlock(); return f.calls }
 func cfg() config.Config {
-	return config.Config{Version: 1, CouncilSize: 1, WorkerConcurrency: 2, Topology: topology.Topology{Endpoints: []topology.Endpoint{{ID: "e", Name: "e", Kind: topology.KindOllama, BaseURL: "http://localhost:1"}}, Roles: topology.Roles{King: topology.Assignment{EndpointID: "e", Model: "m"}, Worker: topology.Assignment{EndpointID: "e", Model: "m"}}}}
+	c := config.Default()
+	c.Providers.Ollama.Enabled = true
+	c.CouncilSize = 1
+	c.WorkerConcurrency = 2
+	c.Topology = topology.Topology{Endpoints: []topology.Endpoint{{ID: "e", Name: "e", Kind: topology.KindOllama, BaseURL: "http://localhost:1"}}, Roles: topology.Roles{King: topology.Assignment{EndpointID: "e", Model: "m"}, Worker: topology.Assignment{EndpointID: "e", Model: "m"}}}
+	return c
 }
 func TestDirectFinal(t *testing.T) {
 	f := &fake{responses: []string{`{"type":"final","content":"done"}`}}
