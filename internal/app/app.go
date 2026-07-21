@@ -587,8 +587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.setup && key == "q" {
 			return m, tea.Quit
 		}
-		manageModels := key == "ctrl+r" || (key == "m" && m.setup && (m.screen == setup.StateProviders || m.screen == setup.StateModels))
-		if manageModels && !m.running && m.localModels.manager != nil && (!m.setup || m.screen == setup.StateProviders || m.screen == setup.StateModels) {
+		if key == "ctrl+r" && !m.setup && !m.running && m.localModels.manager != nil {
 			return m, m.openLocalModels()
 		}
 		if !m.setup && key == "ctrl+s" {

@@ -71,7 +71,7 @@ func TestControlROpensLocalModelsAndKeepsKeysOutOfChat(t *testing.T) {
 	}
 }
 
-func TestDiscoveryGuidesEmptySetupIntoLocalModels(t *testing.T) {
+func TestSetupDoesNotOpenLegacyLocalModelBrowser(t *testing.T) {
 	manager := &fakeLocalModelManager{runtimes: runtimeFixtures()}
 	m := NewWithServices(config.Default(), Services{LocalModels: manager})
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{
@@ -80,12 +80,12 @@ func TestDiscoveryGuidesEmptySetupIntoLocalModels(t *testing.T) {
 	}})
 
 	m, inspect := update(m, key("m"))
-	if !m.localModels.open || inspect == nil {
-		t.Fatal("m did not open local model setup")
+	if m.localModels.open || inspect != nil || m.screen != setup.StateProviders {
+		t.Fatalf("m opened legacy setup browser: open=%v command=%v screen=%v", m.localModels.open, inspect, m.screen)
 	}
-	m, _ = update(m, inspect())
-	if len(m.localModels.runtimes) != len(runtimeFixtures()) {
-		t.Fatalf("runtime inspection missing: %+v", m.localModels.runtimes)
+	m, inspect = update(m, key("ctrl+r"))
+	if m.localModels.open || inspect != nil {
+		t.Fatalf("Ctrl+R opened legacy setup browser: open=%v command=%v", m.localModels.open, inspect)
 	}
 }
 
