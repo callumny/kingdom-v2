@@ -13,6 +13,21 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		roleName = "King"
 	}
 	body := []string{royalBrand.Render("Assign models to roles"), ""}
+	if p.ModelDownloadActive {
+		status := p.ModelDownloadProgress.Status
+		if status == "" {
+			status = "Preparing model download"
+		}
+		body = append(body,
+			royalCyan.Render(fmt.Sprintf("%s · %d%%", status, p.ModelDownloadProgress.Percent)),
+			providerProgressBar(p.ModelDownloadProgress.Percent, 100),
+			royalMuted.Render(p.ModelDownloadProgress.Model),
+			"",
+		)
+	}
+	if p.ModelDownloadError != "" {
+		body = append(body, royalRed.Render("Download failed: "+p.ModelDownloadError), "")
+	}
 	body = append(body,
 		royalText.Render("King")+royalMuted.Render(" — plans and coordinates; a larger model is usually a good fit."),
 		royalText.Render("Worker")+royalMuted.Render(" — handles focused tasks; a smaller model is usually faster."),
@@ -48,7 +63,7 @@ func assignmentLabel(assignment topology.Assignment, wf *setup.Workflow) string 
 		return royalMuted.Render("not assigned")
 	}
 	provider := assignment.EndpointID
-	for _, option := range wf.Draft.Catalog() {
+	for _, option := range wf.Draft.SelectedModels() {
 		if option.Ref == (setup.ModelRef{EndpointID: assignment.EndpointID, ModelID: assignment.Model}) {
 			provider = option.Endpoint.Name
 			break

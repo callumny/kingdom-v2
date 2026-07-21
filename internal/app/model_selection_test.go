@@ -21,6 +21,17 @@ type fakeModelSearcher struct {
 	queries map[string][]modelcatalog.Model
 }
 
+type fakeModelDownloader struct {
+	requests []localmodels.DownloadRequest
+	err      error
+}
+
+func (f *fakeModelDownloader) Download(_ context.Context, request localmodels.DownloadRequest, report localmodels.DownloadReporter) error {
+	f.requests = append(f.requests, request)
+	report(localmodels.DownloadProgress{Model: request.Model, Status: "downloading", Percent: 40})
+	return f.err
+}
+
 func (f *fakeModelSearcher) Search(_ context.Context, provider modelcatalog.Provider, query string, _ int) ([]modelcatalog.Model, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -99,7 +110,7 @@ func TestContinuingWithOnlineModelsRequiresDownloadConfirmation(t *testing.T) {
 	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
 		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "qwen3:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
 	}}}
-	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelSearch: searcher})
+	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelSearch: searcher, ModelDownload: &fakeModelDownloader{}})
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0]}})
 	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
@@ -125,6 +136,62 @@ func TestContinuingWithOnlineModelsRequiresDownloadConfirmation(t *testing.T) {
 	m, _ = update(m, key("y"))
 	if m.screen != setup.StateRoles {
 		t.Fatalf("confirmed selection did not advance: screen=%v", m.screen)
+	}
+}
+
+func TestConfirmedDownloadStartsInBackgroundAndContinuesToRoles(t *testing.T) {
+	downloader := &fakeModelDownloader{}
+	searcher := &fakeModelSearcher{results: map[modelcatalog.Provider][]modelcatalog.Model{
+		modelcatalog.Ollama: {{Provider: modelcatalog.Ollama, ID: "qwen3:14b"}},
+	}}
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "qwen3:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama", BaseURL: "http://127.0.0.1:11434"},
+	}}}
+	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelSearch: searcher, ModelDownload: downloader})
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0]}})
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
+	m, inventory := update(m, key("enter"))
+	m, _ = update(m, inventory())
+	m, _ = update(m, key("/"))
+	m, search := update(m, key("q"))
+	m, _ = update(m, search())
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key(" "))
+	m, _ = update(m, key("enter"))
+	m, _ = update(m, key("enter"))
+	m, command := update(m, key("y"))
+	if m.screen != setup.StateRoles || command == nil || !strings.Contains(m.View().Content, "Preparing model download") {
+		t.Fatalf("download did not continue to roles: screen=%v view=%s", m.screen, m.View().Content)
+	}
+	for command != nil {
+		m, command = update(m, command())
+	}
+	if len(downloader.requests) != 1 || downloader.requests[0].Model != "qwen3:14b" || len(m.workflow.Draft.PendingDownloads()) != 0 {
+		t.Fatalf("requests=%+v pending=%+v", downloader.requests, m.workflow.Draft.PendingDownloads())
+	}
+}
+
+func TestReviewCannotSaveWhileRequiredDownloadsArePendingOrFailed(t *testing.T) {
+	saves := 0
+	m := NewWithServices(config.Default(), Services{Save: func(config.Config) error {
+		saves++
+		return nil
+	}})
+	m.setup = true
+	m.screen = setup.StateReview
+	m.workflow.State = setup.StateReview
+	m.modelDownloadActive = true
+
+	m, command := update(m, key("enter"))
+	if command != nil || saves != 0 || !strings.Contains(m.workflow.Err.Error(), "still in progress") {
+		t.Fatalf("active download reached save: command=%v saves=%d err=%v", command, saves, m.workflow.Err)
+	}
+	m.modelDownloadActive = false
+	m.modelDownloadError = "network unavailable"
+	m, command = update(m, key("enter"))
+	if command != nil || saves != 0 || !strings.Contains(m.workflow.Err.Error(), "network unavailable") {
+		t.Fatalf("failed download reached save: command=%v saves=%d err=%v", command, saves, m.workflow.Err)
 	}
 }
 

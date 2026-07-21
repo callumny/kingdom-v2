@@ -38,6 +38,7 @@ func main() {
 	runtimeRoot := filepath.Join(filepath.Dir(path), "runtimes")
 	localModelManager := localmodels.NewWithRuntimeRoot(localmodels.OSSystem{}, d, mlxCacheRoot, runtimeRoot)
 	providerInstaller := localmodels.NewInstaller(localmodels.OSSystem{}, runtimeRoot)
+	modelDownloader := localmodels.NewDownloader(localmodels.OSSystem{}, nil, runtimeRoot, mlxCacheRoot)
 	client := modelapi.NewClient()
 	workspace, err := os.Getwd()
 	if err != nil {
@@ -76,11 +77,12 @@ func main() {
 		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
 			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active), orchestration.WithMemory(memoryStore, sessionID, 6)).Stream(ctx, prompt)
 		},
-		Skills:      skillLibrary,
-		Memory:      memoryStore,
-		LocalModels: localModelManager,
-		Installer:   providerInstaller,
-		ModelSearch: modelcatalog.DefaultRemote(nil),
+		Skills:        skillLibrary,
+		Memory:        memoryStore,
+		LocalModels:   localModelManager,
+		Installer:     providerInstaller,
+		ModelSearch:   modelcatalog.DefaultRemote(nil),
+		ModelDownload: modelDownloader,
 	}
 	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)

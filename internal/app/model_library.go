@@ -21,7 +21,7 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 		switch key {
 		case "y", "enter":
 			m.modelDownloadConfirming = false
-			return m.advanceFromModels()
+			return m.beginModelDownloads()
 		case "n", "esc":
 			m.modelDownloadConfirming = false
 		}
@@ -89,7 +89,7 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) advanceFromModels() (tea.Model, tea.Cmd) {
+func (m Model) advanceFromModels() (Model, tea.Cmd) {
 	if err := m.workflow.Continue(); err != nil {
 		m.workflow.Err = err
 		return m, nil

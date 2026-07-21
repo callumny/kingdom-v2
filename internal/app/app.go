@@ -66,6 +66,13 @@ type Model struct {
 	modelSearchGen          uint64
 	modelSearchCancel       context.CancelFunc
 	modelDownloadConfirming bool
+	modelDownloader         ModelDownloader
+	modelDownloadActive     bool
+	modelDownloadProgress   localmodels.DownloadProgress
+	modelDownloadError      string
+	modelDownloadCh         <-chan modelDownloadEvent
+	modelDownloadGen        uint64
+	modelDownloadCancel     context.CancelFunc
 	perfFocus               int
 	scanning                bool
 	saveGen                 uint64
@@ -75,15 +82,16 @@ type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
 
 type Services struct {
-	Defaults    []topology.Endpoint
-	Discover    DiscoverFunc
-	Save        func(config.Config) error
-	Run         RunFunc
-	Skills      SkillLibrary
-	Memory      MemoryBrowser
-	LocalModels LocalModelManager
-	Installer   ProviderInstaller
-	ModelSearch ModelSearcher
+	Defaults      []topology.Endpoint
+	Discover      DiscoverFunc
+	Save          func(config.Config) error
+	Run           RunFunc
+	Skills        SkillLibrary
+	Memory        MemoryBrowser
+	LocalModels   LocalModelManager
+	Installer     ProviderInstaller
+	ModelSearch   ModelSearcher
+	ModelDownload ModelDownloader
 }
 
 type DiscoveryMsg struct {
@@ -102,6 +110,10 @@ type ProviderInstaller interface {
 
 type ModelSearcher interface {
 	Search(context.Context, modelcatalog.Provider, string, int) ([]modelcatalog.Model, error)
+}
+
+type ModelDownloader interface {
+	Download(context.Context, localmodels.DownloadRequest, localmodels.DownloadReporter) error
 }
 
 type providerInstallEvent struct {
@@ -131,6 +143,18 @@ type modelSearchMsg struct {
 	warnings   []string
 }
 
+type modelDownloadEvent struct {
+	progress  *localmodels.DownloadProgress
+	installed *setup.ModelRef
+	done      bool
+	err       error
+}
+
+type modelDownloadEventMsg struct {
+	generation uint64
+	event      modelDownloadEvent
+}
+
 func New(c config.Config) Model {
 	return NewWithServices(c, Services{Defaults: discovery.DefaultEndpoints()})
 }
@@ -143,21 +167,22 @@ func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover 
 func NewWithServices(c config.Config, services Services) Model {
 	w := setup.Start(c, services.Defaults)
 	model := Model{
-		config:      c,
-		setup:       c.RequiresSetup(),
-		defaults:    services.Defaults,
-		discover:    services.Discover,
-		save:        services.Save,
-		run:         services.Run,
-		skills:      skillState{library: services.Skills},
-		memory:      memoryState{store: services.Memory},
-		localModels: localModelState{manager: services.LocalModels},
-		installer:   services.Installer,
-		modelSearch: services.ModelSearch,
-		workflow:    w,
-		screen:      w.State,
-		gate:        &setup.GenerationGate{},
-		chat:        ui.NewChatInput(),
+		config:          c,
+		setup:           c.RequiresSetup(),
+		defaults:        services.Defaults,
+		discover:        services.Discover,
+		save:            services.Save,
+		run:             services.Run,
+		skills:          skillState{library: services.Skills},
+		memory:          memoryState{store: services.Memory},
+		localModels:     localModelState{manager: services.LocalModels},
+		installer:       services.Installer,
+		modelSearch:     services.ModelSearch,
+		modelDownloader: services.ModelDownload,
+		workflow:        w,
+		screen:          w.State,
+		gate:            &setup.GenerationGate{},
+		chat:            ui.NewChatInput(),
 	}
 	if model.setup && model.screen == setup.StateProviders && services.Discover != nil {
 		model.scanning = true
@@ -271,6 +296,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelCursor = 0
 		} else if m.modelCursor >= count {
 			m.modelCursor = count - 1
+		}
+	case modelDownloadEventMsg:
+		if !m.modelDownloadActive || x.generation != m.modelDownloadGen {
+			return m, nil
+		}
+		if x.event.progress != nil {
+			m.modelDownloadProgress = *x.event.progress
+			return m, m.nextModelDownloadEvent()
+		}
+		if x.event.installed != nil {
+			m.workflow.Draft.MarkModelInstalled(*x.event.installed)
+			return m, m.nextModelDownloadEvent()
+		}
+		if !x.event.done {
+			return m, m.nextModelDownloadEvent()
+		}
+		m.modelDownloadActive = false
+		m.modelDownloadCancel = nil
+		m.modelDownloadCh = nil
+		if x.event.err != nil {
+			m.modelDownloadError = x.event.err.Error()
 		}
 	case providerInstallEventMsg:
 		if !m.providerInstalling || x.generation != m.providerInstallGen {
@@ -462,6 +508,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+c" {
 			if m.localModels.cancel != nil {
 				m.localModels.cancel()
+			}
+			if m.modelDownloadCancel != nil {
+				m.modelDownloadCancel()
 			}
 			if m.running && m.runCancel != nil {
 				m.runCancel()
@@ -690,6 +739,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case setup.StateReview:
 			if key == "enter" {
+				if m.modelDownloadActive {
+					m.workflow.Err = fmt.Errorf("model downloads are still in progress")
+					break
+				}
+				if m.modelDownloadError != "" {
+					m.workflow.Err = fmt.Errorf("model download failed: %s", m.modelDownloadError)
+					break
+				}
 				cfg := m.workflow.Draft.Config
 				cfg.Topology.Endpoints = m.workflow.Draft.PersistenceEndpoints(m.config.Topology.Endpoints)
 				if m.save == nil {
@@ -787,5 +844,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, ModelQuery: m.modelQuery, ModelSearchActive: m.modelSearchActive, ModelSearching: m.modelSearching, ModelSearchWarning: m.modelSearchWarning, ModelDownloadConfirming: m.modelDownloadConfirming, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, ModelQuery: m.modelQuery, ModelSearchActive: m.modelSearchActive, ModelSearching: m.modelSearching, ModelSearchWarning: m.modelSearchWarning, ModelDownloadConfirming: m.modelDownloadConfirming, ModelDownloadActive: m.modelDownloadActive, ModelDownloadProgress: m.modelDownloadProgress, ModelDownloadError: m.modelDownloadError, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
 }

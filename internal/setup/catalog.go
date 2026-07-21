@@ -154,6 +154,18 @@ func (d Draft) PendingDownloads() []ModelOption {
 	return pending
 }
 
+func (d *Draft) MarkModelInstalled(ref ModelRef) {
+	if option, exists := d.selectedOptions[ref]; exists {
+		option.Installed = true
+		d.selectedOptions[ref] = option
+	}
+	for index := range d.catalog {
+		if d.catalog[index].Ref == ref {
+			d.catalog[index].Installed = true
+		}
+	}
+}
+
 // ReconcileModelSelection removes choices that disappeared on a rescan.
 func (d *Draft) ReconcileModelSelection() []ModelRef {
 	available := make(map[ModelRef]bool)

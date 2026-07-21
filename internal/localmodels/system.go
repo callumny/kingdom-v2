@@ -1,6 +1,7 @@
 package localmodels
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 const maxCommandOutput = 2 << 20
@@ -38,6 +40,51 @@ func (OSSystem) Start(name string, args, environment []string) error {
 		return err
 	}
 	return command.Process.Release()
+}
+
+func (OSSystem) Stream(ctx context.Context, name string, args, environment []string, output func(string)) error {
+	command := exec.CommandContext(ctx, name, args...)
+	command.Env = mergedEnvironment(os.Environ(), environment)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := command.Start(); err != nil {
+		return err
+	}
+	var wait sync.WaitGroup
+	var callback sync.Mutex
+	consume := func(reader io.Reader) {
+		defer wait.Done()
+		scanner := bufio.NewScanner(reader)
+		scanner.Split(splitProgressLines)
+		for scanner.Scan() {
+			callback.Lock()
+			output(scanner.Text())
+			callback.Unlock()
+		}
+	}
+	wait.Add(2)
+	go consume(stdout)
+	go consume(stderr)
+	wait.Wait()
+	return command.Wait()
+}
+
+func splitProgressLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for index, value := range data {
+		if value == '\n' || value == '\r' {
+			return index + 1, data[:index], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 type boundedBuffer struct {
