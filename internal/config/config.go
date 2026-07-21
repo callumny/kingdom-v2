@@ -84,7 +84,10 @@ func (c Config) Validate() error {
 	if c.WorkerConcurrency < 1 || c.WorkerConcurrency > 32 {
 		return fmt.Errorf("worker concurrency must be 1..32")
 	}
-	return c.Topology.Validate()
+	if err := c.Topology.Validate(); err != nil {
+		return err
+	}
+	return validateOllamaPortCapacity(c)
 }
 
 // IsReady reports whether configuration is valid and has required assignments.
