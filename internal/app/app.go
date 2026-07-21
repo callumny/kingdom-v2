@@ -38,6 +38,7 @@ type Model struct {
 	progress                string
 	chatError               string
 	run                     RunFunc
+	prepareRun              PrepareRunFunc
 	runCancel               context.CancelFunc
 	runCh                   <-chan orchestration.Event
 	runGen                  uint64
@@ -80,12 +81,14 @@ type Model struct {
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
+type PrepareRunFunc func(context.Context, config.Config) (config.Config, error)
 
 type Services struct {
 	Defaults      []topology.Endpoint
 	Discover      DiscoverFunc
 	Save          func(config.Config) error
 	Run           RunFunc
+	PrepareRun    PrepareRunFunc
 	Skills        SkillLibrary
 	Memory        MemoryBrowser
 	LocalModels   LocalModelManager
@@ -173,6 +176,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		discover:        services.Discover,
 		save:            services.Save,
 		run:             services.Run,
+		prepareRun:      services.PrepareRun,
 		skills:          skillState{library: services.Skills},
 		memory:          memoryState{store: services.Memory},
 		localModels:     localModelState{manager: services.LocalModels},
@@ -463,6 +467,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.nextEvent()
 		}
 		switch x.Event.Type {
+		case orchestration.EventRuntimePreparing:
+			m.progress = "Starting local model servers…"
 		case orchestration.EventStarted:
 			m.progress = "Started…"
 		case orchestration.EventKingThinking:
@@ -637,7 +643,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.running = true
 					m.runGen++
 					active := append([]skills.Skill(nil), m.skills.active...)
-					m.runCh = m.run(ctx, m.config, p, active)
+					m.runCh = m.startRunStream(ctx, m.config, p, active)
 					if m.runCh == nil {
 						m.running = false
 						m.runCancel = nil

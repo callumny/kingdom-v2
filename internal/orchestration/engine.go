@@ -21,6 +21,7 @@ type ChatClient = modelapi.ChatClient
 type EventType string
 
 const (
+	EventRuntimePreparing EventType = "runtime-preparing"
 	EventStarted          EventType = "started"
 	EventKingThinking     EventType = "king-thinking"
 	EventWorkersRunning   EventType = "workers-running"

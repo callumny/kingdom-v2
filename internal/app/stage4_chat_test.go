@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -176,6 +177,67 @@ func TestRunUsesLatestSavedConfig(t *testing.T) {
 	m, _ = update(m, key("ctrl+enter"))
 	if got.Topology.Roles.King.Model != "latest" {
 		t.Fatal("run did not use latest config")
+	}
+}
+
+func TestRunPreparationTransformsRuntimeConfig(t *testing.T) {
+	cfg := completeConfig()
+	prepared := make(chan config.Config, 1)
+	m := NewWithServices(cfg, Services{
+		PrepareRun: func(_ context.Context, next config.Config) (config.Config, error) {
+			next.Topology.Roles.King.Model = "runtime-king"
+			return next, nil
+		},
+		Run: func(_ context.Context, next config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+			prepared <- next
+			ch := make(chan orchestration.Event, 1)
+			ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
+			return ch
+		},
+	})
+	m.chat.SetValue("hello")
+	n, cmd := m.Update(key("ctrl+enter"))
+	m = n.(Model)
+	if cmd == nil {
+		t.Fatal("missing runtime preparation event")
+	}
+	m, cmd = update(m, cmd())
+	if m.progress != "Starting local model servers…" {
+		t.Fatalf("progress=%q", m.progress)
+	}
+	if cmd == nil {
+		t.Fatal("preparation did not continue to orchestration")
+	}
+	m, _ = update(m, cmd())
+	if got := (<-prepared).Topology.Roles.King.Model; got != "runtime-king" {
+		t.Fatalf("runtime model=%q", got)
+	}
+	if cfg.Topology.Roles.King.Model == "runtime-king" {
+		t.Fatal("preparation mutated persisted config")
+	}
+}
+
+func TestRunPreparationFailureDoesNotStartOrchestration(t *testing.T) {
+	runs := 0
+	m := NewWithServices(completeConfig(), Services{
+		PrepareRun: func(context.Context, config.Config) (config.Config, error) {
+			return config.Config{}, errors.New("could not start Ollama")
+		},
+		Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event {
+			runs++
+			return nil
+		},
+	})
+	m.chat.SetValue("hello")
+	n, cmd := m.Update(key("ctrl+enter"))
+	m = n.(Model)
+	m, cmd = update(m, cmd())
+	if cmd == nil {
+		t.Fatal("missing preparation failure event")
+	}
+	m, _ = update(m, cmd())
+	if runs != 0 || m.running || !strings.Contains(m.chatError, "could not start Ollama") {
+		t.Fatalf("runs=%d running=%v error=%q", runs, m.running, m.chatError)
 	}
 }
 

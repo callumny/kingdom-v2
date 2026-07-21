@@ -1,8 +1,12 @@
 package app
 
 import (
+	"context"
+
 	tea "charm.land/bubbletea/v2"
+	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/orchestration"
+	"github.com/callumny/kingdom/internal/skills"
 )
 
 // chatEventMsg carries one orchestration event together with the run
@@ -11,6 +15,51 @@ import (
 type chatEventMsg struct {
 	Generation uint64
 	Event      orchestration.Event
+}
+
+func (m Model) startRunStream(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
+	if m.prepareRun == nil {
+		return m.run(ctx, cfg, prompt, active)
+	}
+	out := make(chan orchestration.Event)
+	go func() {
+		defer close(out)
+		emit := func(event orchestration.Event) bool {
+			select {
+			case out <- event:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+		if !emit(orchestration.Event{Type: orchestration.EventRuntimePreparing}) {
+			return
+		}
+		runtimeConfig, err := m.prepareRun(ctx, cfg)
+		if err != nil {
+			emit(orchestration.Event{Type: orchestration.EventFailed, Message: err.Error()})
+			return
+		}
+		stream := m.run(ctx, runtimeConfig, prompt, active)
+		if stream == nil {
+			emit(orchestration.Event{Type: orchestration.EventFailed, Message: "orchestration stream unavailable"})
+			return
+		}
+		for {
+			select {
+			case event, ok := <-stream:
+				if !ok {
+					return
+				}
+				if !emit(event) {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
 }
 
 // nextEvent returns a command that waits for the next event from the active
