@@ -24,6 +24,19 @@ type RuntimePlan struct {
 	OllamaRoutes []OllamaRoute
 }
 
+// UsesManagedOllama reports whether an active role uses Kingdom's managed
+// Ollama provider. Custom Ollama-compatible endpoints are intentionally not
+// included because Kingdom does not own their processes or ports.
+func UsesManagedOllama(c Config) bool {
+	return len(managedOllamaModels(c)) > 0
+}
+
+// ValidateOllamaPortPlan checks that dedicated mode can allocate one
+// consecutive port per unique managed model.
+func ValidateOllamaPortPlan(c Config) error {
+	return validateOllamaPortCapacity(c)
+}
+
 // BuildRuntimePlan resolves managed Ollama assignments to deterministic local
 // endpoints. Dedicated mode uses one endpoint per unique active model; shared
 // mode routes every model through the configured base port.

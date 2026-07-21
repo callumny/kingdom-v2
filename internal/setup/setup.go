@@ -233,6 +233,9 @@ func (w *Workflow) Continue() error {
 		}
 		w.State = StatePerformance
 	case StatePerformance:
+		if err := config.ValidateOllamaPortPlan(w.Draft.Config); err != nil {
+			return err
+		}
 		w.State = StateReview
 	}
 	return nil

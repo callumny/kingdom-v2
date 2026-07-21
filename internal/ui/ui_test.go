@@ -146,6 +146,81 @@ func TestPerformanceMarkerFollowsFocus(t *testing.T) {
 	}
 }
 
+func TestPerformanceViewExplainsDedicatedOllamaServers(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	view := ViewWithPresentation(100, 40, true, w, Presentation{PerfFocus: 2}).Content
+	for _, want := range []string{
+		"Advanced performance",
+		"Council members",
+		"Concurrent workers",
+		"> Separate Ollama servers",
+		"ON",
+		"Recommended",
+		"large → 127.0.0.1:11434",
+		"small → 127.0.0.1:11435",
+		"MLX is unaffected",
+		"Space Toggle",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("performance view missing %q: %s", want, view)
+		}
+	}
+	assertViewFits(t, view, 100, 40)
+}
+
+func TestPerformanceViewExplainsSharedOllamaServer(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaSharedPort)
+	view := ViewWithPresentation(100, 40, true, w, Presentation{PerfFocus: 2}).Content
+	for _, want := range []string{
+		"Separate Ollama servers",
+		"OFF",
+		"large + small → 127.0.0.1:11434",
+		"less memory",
+		"contention",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("shared performance view missing %q: %s", want, view)
+		}
+	}
+}
+
+func TestPerformanceViewHidesOllamaControlForMLXOnlySetup(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	w.Draft.Config.Providers.Ollama.Enabled = false
+	w.Draft.Config.Providers.MLX.Enabled = true
+	w.Draft.Config.Topology.Endpoints = []topology.Endpoint{{ID: setup.MLXEndpointID, Name: "MLX", Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:8080/v1"}}
+	w.Draft.Config.Topology.Roles.King = topology.Assignment{EndpointID: setup.MLXEndpointID, Model: "large"}
+	w.Draft.Config.Topology.Roles.Worker = topology.Assignment{EndpointID: setup.MLXEndpointID, Model: "small"}
+	w.Draft.Config.Topology.Roles.Council = w.Draft.Config.Topology.Roles.King
+
+	view := ViewWithPresentation(100, 40, true, w, Presentation{PerfFocus: 1}).Content
+	if strings.Contains(view, "Separate Ollama servers") || strings.Contains(view, "Space Toggle") {
+		t.Fatalf("MLX-only view exposed Ollama controls: %s", view)
+	}
+}
+
+func TestReviewShowsOllamaServerPlan(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	w.State = setup.StateReview
+	view := ViewWithPresentation(100, 40, true, w, Presentation{}).Content
+	for _, want := range []string{"Ollama servers: separate", "large → 127.0.0.1:11434", "small → 127.0.0.1:11435"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("review missing %q: %s", want, view)
+		}
+	}
+}
+
+func managedOllamaPerformanceWorkflow(mode config.OllamaPortMode) *setup.Workflow {
+	cfg := config.Default()
+	cfg.Providers.Ollama.Enabled = true
+	cfg.Providers.Ollama.PortMode = mode
+	cfg.Topology.Endpoints = []topology.Endpoint{{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:11434"}}
+	cfg.Topology.Roles.King = topology.Assignment{EndpointID: setup.OllamaEndpointID, Model: "large"}
+	cfg.Topology.Roles.Worker = topology.Assignment{EndpointID: setup.OllamaEndpointID, Model: "small"}
+	cfg.Topology.Roles.Council = cfg.Topology.Roles.King
+	return &setup.Workflow{State: setup.StatePerformance, Draft: setup.NewDraft(cfg, nil)}
+}
+
 func TestPresentationRendererStates(t *testing.T) {
 	w := &setup.Workflow{State: setup.StateProviders, Draft: setup.Draft{Results: []setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e1", Name: "ep"}, Models: []discovery.Model{{ID: "m1"}}}}}}
 	scanning := ViewWithPresentation(80, 40, true, w, Presentation{Scanning: true}).Content
@@ -169,7 +244,7 @@ func TestPresentationRendererStates(t *testing.T) {
 	}
 	perf := *w
 	perf.State = setup.StatePerformance
-	if !strings.Contains(ViewWithPresentation(80, 40, true, &perf, Presentation{PerfFocus: 1}).Content, "> Worker concurrency") {
+	if !strings.Contains(ViewWithPresentation(80, 40, true, &perf, Presentation{PerfFocus: 1}).Content, "> Concurrent workers") {
 		t.Fatal("focus")
 	}
 	rev := *w

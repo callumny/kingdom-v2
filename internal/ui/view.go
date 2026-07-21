@@ -58,13 +58,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			body, footer = rolesSetupView(wf, p)
 		case setup.StatePerformance:
 			progress = setupProgress(4)
-			body = append(body, royalBrand.Render("Advanced performance"), "", "Tune for your hardware.")
-			first, second := "> ", "  "
-			if p.PerfFocus == 1 {
-				first, second = "  ", "> "
-			}
-			body = append(body, "", fmt.Sprintf("%sCouncil size: %d", first, wf.Draft.Config.CouncilSize), fmt.Sprintf("%sWorker concurrency: %d", second, wf.Draft.Config.WorkerConcurrency))
-			footer = royalMuted.Render("↑↓ Move   •   ←→ Adjust   •   Enter Continue   •   Esc Back")
+			body, footer = performanceSetupView(wf, p)
 		case setup.StateReview:
 			progress = setupProgress(4)
 			body = append(body, royalBrand.Render("Review your setup"), "")
@@ -80,6 +74,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 				fmt.Sprintf("Council size: %d", wf.Draft.Config.CouncilSize),
 				fmt.Sprintf("Worker concurrency: %d", wf.Draft.Config.WorkerConcurrency),
 			)
+			body = append(body, reviewOllamaSummary(wf.Draft.Config)...)
 			for _, e := range wf.Draft.PersistenceEndpoints(p.PreviousEndpoints) {
 				body = append(body, fmt.Sprintf("Endpoint: %s (%s)", e.Name, e.BaseURL))
 			}

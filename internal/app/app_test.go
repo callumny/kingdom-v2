@@ -426,6 +426,52 @@ func TestPerformanceScreenAdjustsWithinBounds(t *testing.T) {
 	}
 }
 
+func TestPerformanceScreenTogglesDedicatedOllamaServers(t *testing.T) {
+	m := NewWithDeps(managedOllamaAppConfig(), nil, nil)
+	m.setup = true
+	m.screen, m.workflow.State = setup.StatePerformance, setup.StatePerformance
+
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key("down"))
+	if m.perfFocus != 2 {
+		t.Fatalf("focus=%d, want Ollama control", m.perfFocus)
+	}
+	workers := m.workflow.Draft.Config.WorkerConcurrency
+	m, _ = update(m, key("right"))
+	if m.workflow.Draft.Config.WorkerConcurrency != workers {
+		t.Fatal("Ollama control adjusted worker concurrency")
+	}
+	m, _ = update(m, key(" "))
+	if got := m.workflow.Draft.Config.Providers.Ollama.PortMode; got != config.OllamaSharedPort {
+		t.Fatalf("mode=%q, want shared", got)
+	}
+	m, _ = update(m, key(" "))
+	if got := m.workflow.Draft.Config.Providers.Ollama.PortMode; got != config.OllamaDedicatedPorts {
+		t.Fatalf("mode=%q, want dedicated", got)
+	}
+}
+
+func TestPerformanceScreenHasTwoControlsWithoutManagedOllama(t *testing.T) {
+	m := NewWithDeps(completeConfig(), nil, nil)
+	m.setup = true
+	m.screen, m.workflow.State = setup.StatePerformance, setup.StatePerformance
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key("down"))
+	if m.perfFocus != 0 {
+		t.Fatalf("focus=%d, want two-control wrap", m.perfFocus)
+	}
+}
+
+func managedOllamaAppConfig() config.Config {
+	cfg := config.Default()
+	cfg.Providers.Ollama.Enabled = true
+	cfg.Topology.Endpoints = []topology.Endpoint{{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:11434"}}
+	cfg.Topology.Roles.King = topology.Assignment{EndpointID: setup.OllamaEndpointID, Model: "large"}
+	cfg.Topology.Roles.Worker = topology.Assignment{EndpointID: setup.OllamaEndpointID, Model: "small"}
+	cfg.Topology.Roles.Council = cfg.Topology.Roles.King
+	return cfg
+}
+
 func TestLateDiscoveryIgnoredAfterLeavingScreen(t *testing.T) {
 	m := NewWithDepsAndSave(config.Default(), nil, nil, nil)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: topology.Endpoint{ID: "e"}, Models: []discovery.Model{{ID: "m"}}}})

@@ -721,10 +721,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case setup.StatePerformance:
 			if key == "up" || key == "k" {
-				m.perfFocus = (m.perfFocus + 1) % 2
+				m.perfFocus = (m.perfFocus - 1 + m.performanceControlCount()) % m.performanceControlCount()
 			}
 			if key == "down" || key == "j" {
-				m.perfFocus = (m.perfFocus + 1) % 2
+				m.perfFocus = (m.perfFocus + 1) % m.performanceControlCount()
 			}
 			if key == "left" || key == "h" {
 				m.adjustPerformance(-1)
@@ -732,9 +732,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key == "right" || key == "l" {
 				m.adjustPerformance(1)
 			}
+			if (key == " " || key == "space") && m.perfFocus == 2 && config.UsesManagedOllama(m.workflow.Draft.Config) {
+				if m.workflow.Draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
+					m.workflow.Draft.Config.Providers.Ollama.PortMode = config.OllamaSharedPort
+				} else {
+					m.workflow.Draft.Config.Providers.Ollama.PortMode = config.OllamaDedicatedPorts
+				}
+				m.workflow.Err = nil
+			}
 			if key == "enter" {
-				_ = m.workflow.Continue()
-				m.screen = m.workflow.State
+				if err := m.workflow.Continue(); err != nil {
+					m.workflow.Err = err
+				} else {
+					m.workflow.Err = nil
+					m.screen = m.workflow.State
+				}
 			}
 		case setup.StateReview:
 			if key == "enter" {
@@ -794,9 +806,16 @@ func (m *Model) modelCount() int {
 func (m *Model) adjustPerformance(delta int) {
 	if m.perfFocus == 0 {
 		m.workflow.Draft.Config.CouncilSize = max(1, min(9, m.workflow.Draft.Config.CouncilSize+delta))
-	} else {
+	} else if m.perfFocus == 1 {
 		m.workflow.Draft.Config.WorkerConcurrency = max(1, min(32, m.workflow.Draft.Config.WorkerConcurrency+delta))
 	}
+}
+
+func (m Model) performanceControlCount() int {
+	if m.workflow != nil && config.UsesManagedOllama(m.workflow.Draft.Config) {
+		return 3
+	}
+	return 2
 }
 func min(a, b int) int {
 	if a < b {
