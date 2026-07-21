@@ -13,7 +13,7 @@ type Presentation struct {
 	ModelIndex, ModelCursor, Role, ProviderCursor, PerfFocus int
 	Form                                                     *CustomEndpointForm
 	PreviousEndpoints                                        []topology.Endpoint
-	FormActive, Scanning, Saving                             bool
+	FormActive, Scanning, ModelInventoryLoading, Saving      bool
 	ProviderConfirming, ProviderInstalling                   bool
 	ProviderNotice                                           string
 	ProviderProgress                                         localmodels.InstallProgress

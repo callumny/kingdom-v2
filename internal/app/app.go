@@ -54,6 +54,8 @@ type Model struct {
 	providerInstallCh  <-chan providerInstallEvent
 	providerInstallGen uint64
 	modelCursor        int
+	modelInventoryGen  uint64
+	modelInventoryLoad bool
 	perfFocus          int
 	scanning           bool
 	saveGen            uint64
@@ -101,6 +103,11 @@ type providerInstallEventMsg struct {
 
 type providerRuntimesMsg struct {
 	runtimes []localmodels.Runtime
+}
+
+type modelInventoryMsg struct {
+	generation uint64
+	runtimes   []localmodels.Runtime
 }
 
 func New(c config.Config) Model {
@@ -216,6 +223,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case localmodels.KindMLX:
 				m.workflow.Draft.SetProviderReady(setup.MLXEndpointID, runtime.Installed)
 			}
+		}
+	case modelInventoryMsg:
+		if m.workflow == nil || m.screen != setup.StateModels || x.generation != m.modelInventoryGen {
+			return m, nil
+		}
+		m.modelInventoryLoad = false
+		m.workflow.Draft.ReplaceCatalog(m.installedModelOptions(x.runtimes))
+		m.workflow.Draft.ReconcileModelSelection()
+		if count := len(m.workflow.Draft.Catalog()); count == 0 {
+			m.modelCursor = 0
+		} else if m.modelCursor >= count {
+			m.modelCursor = count - 1
 		}
 	case providerInstallEventMsg:
 		if !m.providerInstalling || x.generation != m.providerInstallGen {
@@ -549,9 +568,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat, cmd = m.chat.Update(msg)
 			return m, cmd
 		}
-		if key == "r" && (m.screen == setup.StateProviders || m.screen == setup.StateModels) {
+		if key == "r" && m.screen == setup.StateProviders {
 			m.localModels.preferred = nil
 			return m.beginDiscovery()
+		}
+		if key == "r" && m.screen == setup.StateModels {
+			return m.beginModelInventory()
 		}
 		if key == "a" && m.screen == setup.StateProviders {
 			m.form = ui.NewCustomEndpointForm()
@@ -560,6 +582,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key == "esc" {
 			m.gate.Cancel()
+			m.modelInventoryGen++
+			m.modelInventoryLoad = false
 			m.localModels.preferred = nil
 			m.scanning = false
 			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateModels || m.screen == setup.StateProviders {
@@ -724,5 +748,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
 }

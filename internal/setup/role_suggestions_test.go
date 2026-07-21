@@ -83,6 +83,7 @@ func TestRoleSuggestionsInferParameterScaleFromModelID(t *testing.T) {
 	draft := selectionDraft()
 	draft.Results[0].Models = []discovery.Model{{ID: "qwen-3b"}}
 	draft.Results[1].Models = []discovery.Model{{ID: "mlx-community/qwen-14B-instruct"}}
+	draft.ApplyResults(draft.Results)
 	large := ModelRef{EndpointID: "mlx-local", ModelID: "mlx-community/qwen-14B-instruct"}
 	small := ModelRef{EndpointID: "ollama-local", ModelID: "qwen-3b"}
 	_ = draft.ToggleModel(large)

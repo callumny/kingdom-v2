@@ -94,6 +94,7 @@ type Draft struct {
 	Results        []EndpointResult
 	selectedModels []ModelRef
 	providerReady  map[string]bool
+	catalog        []ModelOption
 }
 
 func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
@@ -136,6 +137,7 @@ func (d Draft) HasModels() bool {
 func (d Draft) Ready() bool { return d.Config.IsReady() }
 func (d *Draft) ApplyResults(rs []EndpointResult) {
 	d.Results = rs
+	d.ReplaceCatalog(modelOptionsFromResults(rs))
 	if d.providerReady == nil {
 		d.providerReady = make(map[string]bool)
 	}

@@ -26,30 +26,49 @@ func (r ModelRef) Assignment() topology.Assignment {
 type ModelOption struct {
 	Ref           ModelRef
 	Endpoint      topology.Endpoint
+	Installed     bool
 	SizeBytes     int64
 	Family        string
 	ParameterSize string
 	Quantization  string
 }
 
-// Catalog flattens provider discovery results into stable, unique choices.
+// Catalog returns the choices supplied by the application boundary. Keeping
+// inventory separate from provider health lets cached MLX models appear even
+// when no MLX model server is currently running.
 func (d Draft) Catalog() []ModelOption {
+	if d.catalog != nil {
+		return append([]ModelOption(nil), d.catalog...)
+	}
+	return modelOptionsFromResults(d.Results)
+}
+
+// ReplaceCatalog atomically replaces the transient choices shown during setup.
+// Model identity includes the endpoint because names may overlap across
+// providers.
+func (d *Draft) ReplaceCatalog(options []ModelOption) {
 	seen := make(map[ModelRef]bool)
-	options := make([]ModelOption, 0)
-	for _, result := range d.Results {
-		endpointID := strings.TrimSpace(result.Endpoint.ID)
-		if endpointID == "" {
+	normalized := make([]ModelOption, 0, len(options))
+	for _, option := range options {
+		option.Ref.EndpointID = strings.TrimSpace(option.Ref.EndpointID)
+		option.Ref.ModelID = strings.TrimSpace(option.Ref.ModelID)
+		if option.Ref.EndpointID == "" || option.Ref.ModelID == "" || seen[option.Ref] {
 			continue
 		}
+		seen[option.Ref] = true
+		normalized = append(normalized, option)
+	}
+	d.catalog = normalized
+}
+
+func modelOptionsFromResults(results []EndpointResult) []ModelOption {
+	options := make([]ModelOption, 0)
+	for _, result := range results {
 		for _, model := range result.Models {
-			ref := ModelRef{EndpointID: endpointID, ModelID: strings.TrimSpace(model.ID)}
-			if ref.ModelID == "" || seen[ref] {
-				continue
-			}
-			seen[ref] = true
 			options = append(options, ModelOption{
-				Ref:           ref,
+				Ref:           ModelRef{EndpointID: result.Endpoint.ID, ModelID: model.ID},
 				Endpoint:      result.Endpoint,
+				Installed:     true,
 				SizeBytes:     model.SizeBytes,
 				Family:        model.Family,
 				ParameterSize: model.ParameterSize,
@@ -57,7 +76,9 @@ func (d Draft) Catalog() []ModelOption {
 			})
 		}
 	}
-	return options
+	draft := Draft{}
+	draft.ReplaceCatalog(options)
+	return draft.catalog
 }
 
 // ToggleModel adds or removes one catalogue choice from the transient setup

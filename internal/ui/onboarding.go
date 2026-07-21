@@ -85,6 +85,10 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	selected := wf.Draft.SelectedModels()
 	body := []string{royalBrand.Render("Choose your models"), ""}
 	body = append(body, styledParagraph("Choose up to three models from any provider. A mix of sizes gives Kingdom flexible options for different jobs.", 88, royalMuted)...)
+	if p.ModelInventoryLoading {
+		body = append(body, "", royalCyan.Render("Checking installed models across your selected providers…"))
+		return body, royalMuted.Render("Checking installed models…   •   Esc Back")
+	}
 	body = append(body, "", royalCyan.Render(fmt.Sprintf("%d of %d selected", len(selected), setup.MaxSelectedModels)), "")
 	for index, option := range wf.Draft.Catalog() {
 		pointer := "  "

@@ -50,6 +50,23 @@ func TestModelSelectionRejectsUnknownModelAndReconcilesRescan(t *testing.T) {
 	}
 }
 
+func TestCatalogCanUseInstalledInventoryWithoutChangingProviderHealth(t *testing.T) {
+	draft := selectionDraft()
+	providerResults := append([]EndpointResult(nil), draft.Results...)
+	draft.ReplaceCatalog([]ModelOption{
+		{Ref: ModelRef{EndpointID: "ollama-local", ModelID: "installed-ollama"}, Endpoint: providerResults[0].Endpoint, Installed: true},
+		{Ref: ModelRef{EndpointID: "mlx-local", ModelID: "installed-mlx"}, Endpoint: providerResults[1].Endpoint, Installed: true},
+	})
+
+	catalog := draft.Catalog()
+	if len(catalog) != 2 || catalog[0].Ref.ModelID != "installed-ollama" || catalog[1].Ref.ModelID != "installed-mlx" {
+		t.Fatalf("catalog=%+v", catalog)
+	}
+	if len(draft.Results) != len(providerResults) || draft.Results[0].Models[0].ID != providerResults[0].Models[0].ID {
+		t.Fatalf("provider results changed: %+v", draft.Results)
+	}
+}
+
 func TestWorkflowIncludesModelsBetweenProvidersAndRoles(t *testing.T) {
 	draft := selectionDraft()
 	w := &Workflow{State: StateProviders, Draft: draft}
