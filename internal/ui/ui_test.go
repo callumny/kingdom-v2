@@ -159,6 +159,8 @@ func TestPerformanceViewExplainsDedicatedOllamaServers(t *testing.T) {
 		"large → 127.0.0.1:11434",
 		"small → 127.0.0.1:11435",
 		"MLX is unaffected",
+		"Hardware note",
+		"more RAM",
 		"Space Toggle",
 	} {
 		if !strings.Contains(view, want) {

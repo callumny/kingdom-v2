@@ -22,12 +22,21 @@ Select up to three choices. Kingdom asks for confirmation before downloading any
 assignment continue while progress is shown. The role screen suggests the largest selected model for
 King and the smallest for Worker. With three choices it suggests the middle model for Council; with
 fewer choices Council starts disabled. Every suggestion can be changed before the reviewed
-configuration is atomically saved.
+configuration is atomically saved. The Performance screen sets council size, worker concurrency, and
+whether selected Ollama models use separate servers. Separate servers are the default: Kingdom shows
+the consecutive loopback ports it will use before setup is saved. MLX is unchanged because each MLX
+model already has its own server.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
 browse memory, Ctrl+S to reopen setup, and Ctrl+C to cancel and quit. Progress
 and the final King response are shown in the current chat history.
+
+Before each prompt, Kingdom derives an in-memory runtime topology from the saved model assignments.
+In separate Ollama mode, each unique selected Ollama model is routed to its own server and consecutive
+port; roles sharing a model share that server. Kingdom reuses healthy servers and starts missing ones
+on loopback. Shared mode routes every selected Ollama model through the configured base port. Generated
+runtime endpoints are not written to the configuration file.
 
 Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Before each run, the King receives
 up to six recent exchanges as clearly labelled, untrusted historical context. Press `Ctrl+M` while

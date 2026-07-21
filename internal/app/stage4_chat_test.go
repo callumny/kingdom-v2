@@ -192,6 +192,7 @@ func TestRunPreparationTransformsRuntimeConfig(t *testing.T) {
 			prepared <- next
 			ch := make(chan orchestration.Event, 1)
 			ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
+			close(ch)
 			return ch
 		},
 	})

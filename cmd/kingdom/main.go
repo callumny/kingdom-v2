@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -74,6 +75,9 @@ func main() {
 			}
 		},
 		Save: func(next config.Config) error { return config.Save(path, next) },
+		PrepareRun: func(ctx context.Context, cfg config.Config) (config.Config, error) {
+			return prepareRuntimeConfig(ctx, cfg, localModelManager.EnsureOllamaServers)
+		},
 		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
 			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active), orchestration.WithMemory(memoryStore, sessionID, 6)).Stream(ctx, prompt)
 		},
@@ -89,4 +93,29 @@ func main() {
 	if _, err := program.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func prepareRuntimeConfig(ctx context.Context, persisted config.Config, ensure func(context.Context, []topology.Endpoint) error) (config.Config, error) {
+	plan, err := config.BuildRuntimePlan(persisted)
+	if err != nil {
+		return config.Config{}, fmt.Errorf("plan local runtimes: %w", err)
+	}
+	endpoints := make([]topology.Endpoint, 0, len(plan.OllamaRoutes))
+	seen := make(map[string]bool, len(plan.OllamaRoutes))
+	for _, route := range plan.OllamaRoutes {
+		if seen[route.Endpoint.BaseURL] {
+			continue
+		}
+		seen[route.Endpoint.BaseURL] = true
+		endpoints = append(endpoints, route.Endpoint)
+	}
+	if len(endpoints) > 0 {
+		if ensure == nil {
+			return config.Config{}, fmt.Errorf("prepare Ollama servers: local model manager is unavailable")
+		}
+		if err := ensure(ctx, endpoints); err != nil {
+			return config.Config{}, fmt.Errorf("prepare Ollama servers: %w", err)
+		}
+	}
+	return plan.Config, nil
 }

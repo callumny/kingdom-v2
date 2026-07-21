@@ -41,7 +41,18 @@ func performanceSetupView(wf *setup.Workflow, p Presentation) ([]string, string)
 		}
 		body = append(body, ollamaRouteLines(cfg)...)
 		body = append(body, royalMuted.Render("  MLX is unaffected because it already runs one model per server."))
+		body = append(body,
+			"",
+			royalGold.Render("Hardware note"),
+			royalMuted.Render("More parallel work is not always faster. Separate servers can use more RAM."),
+		)
 		footer = "↑↓ Move   •   ←→ Adjust   •   Space Toggle   •   Enter Continue   •   Esc Back"
+	} else {
+		body = append(body,
+			"",
+			royalGold.Render("Hardware note"),
+			royalMuted.Render("More parallel work is not always faster; larger models need more memory."),
+		)
 	}
 	if wf.Err != nil {
 		body = append(body, "", royalRed.Render(wf.Err.Error()))

@@ -29,7 +29,14 @@ and the composition root connects them. Provider-specific HTTP payloads do not e
 package; callers receive one normalized model type and ordered endpoint results. The setup package
 does not import Bubble Tea, perform HTTP requests, or write files. `internal/app` translates key
 presses and asynchronous messages into setup transitions, while `cmd/kingdom` injects the concrete
-discover, save, and orchestration functions.
+discover, save, runtime-preparation, and orchestration functions.
+
+Runtime topology is derived immediately before a prompt. `internal/config` creates a deep-enough copy
+of the saved topology, allocates deterministic consecutive loopback ports for unique managed Ollama
+models, and rewrites only the copied role assignments. `cmd/kingdom` asks `internal/localmodels` to
+ensure those endpoints are ready, then passes the copied configuration to orchestration. The TUI sees
+typed progress events and does not block. Persisted topology remains provider/model oriented and never
+contains generated process endpoints.
 
 The model API supports the two topology endpoint kinds without exposing their wire formats: Ollama
 uses `/api/chat`, while OpenAI-compatible runtimes use `/chat/completions`. Requests are non-streaming
@@ -92,7 +99,11 @@ loopback endpoint is ready. Inspection runs the providers concurrently but prese
 stable display order. The TUI sees only normalized runtime/model status and calls one confirmed
 start-and-wait operation.
 
-Ollama starts its long-running server and exposes installed models through its local API. MLX scans bounded Hugging Face cache entries for complete
+Ollama starts its long-running server and exposes installed models through its local API. Before a
+prompt, the manager probes each planned Ollama endpoint, reuses healthy servers, and starts each missing
+unique host/port once. It accepts only explicit HTTP loopback addresses and invokes `ollama serve` as
+an argument vector with `OLLAMA_HOST`; it never constructs a shell command. MLX scans bounded Hugging
+Face cache entries for complete
 snapshots and launches only an exact cached repository ID with offline mode and the cache path forced
 into the child environment. Long-running processes receive no terminal input/output, enter a detached
 process session, and intentionally survive Kingdom. All commands bypass a shell, command output is
@@ -104,7 +115,11 @@ into this screen: its single path is Providers → Models → Roles → Review. 
 topology configuration directly. Arbitrary model paths, remote binds, unloading, and process shutdown
 remain outside the product scope.
 
-The setup path is providers -> models -> role assignment -> performance -> review -> ready. Provider
+The setup path is providers -> models -> role assignment -> performance -> review -> ready. The
+performance step configures Council members, concurrent Workers, and—when a managed Ollama model is
+assigned—separate or shared Ollama servers. Separate mode is the default and previews one consecutive
+port per unique selected model; roles using the same model reuse its port. Shared mode uses only the
+configured base port. MLX and custom endpoints are not affected. Provider
 enablement is a persisted user choice; installation/running health and discovered models are transient
 runtime facts. Keeping these separate allows a selected provider with no installed models to progress
 to remote search. A model is identified by its endpoint ID plus model ID, so the user can select up to
