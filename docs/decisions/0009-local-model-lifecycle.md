@@ -1,6 +1,6 @@
 # ADR 0009: Confirmed local model startup
 
-Status: accepted
+Status: superseded by ADR 0012 and ADR 0014
 
 ## Decision
 

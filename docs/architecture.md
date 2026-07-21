@@ -7,6 +7,7 @@ Kingdom is deliberately small and layered:
 * `internal/config` validates and atomically persists versioned configuration.
 * `internal/topology` defines local endpoints and king, council, and worker assignments.
 * `internal/discovery` queries Ollama and OpenAI-compatible endpoints and normalizes their models.
+* `internal/modelcatalog` searches remote provider catalogues and merges installed-first results.
 * `internal/modelapi` translates normalized chat messages into provider-specific local HTTP requests.
 * `internal/localmodels` inspects and starts installed Ollama and MLX runtimes.
 * `internal/memory` owns the versioned SQLite schema and bounded conversation persistence.
@@ -97,11 +98,11 @@ into the child environment. Long-running processes receive no terminal input/out
 process session, and intentionally survive Kingdom. All commands bypass a shell, command output is
 bounded, startup is cancellable, and readiness is capped at two minutes.
 
-After readiness, the local-model screen refreshes normalized status. Entering a loaded model reuses
-the existing setup workflow: Kingdom rescans all endpoints, returns to the current setup step, and
-focuses the exact endpoint/model identity in the model catalogue. It never selects a model or advances
-setup on the user's behalf. No runtime adapter writes topology configuration directly. Downloads,
-arbitrary model paths, remote binds, unloading, and process shutdown are outside this stage.
+After readiness, the Ctrl+R local-model screen remains an idle-screen maintenance tool. It refreshes
+normalized runtime status and can start an installed runtime after confirmation. Setup does not branch
+into this screen: its single path is Providers → Models → Roles → Review. No runtime adapter writes
+topology configuration directly. Arbitrary model paths, remote binds, unloading, and process shutdown
+remain outside the product scope.
 
 The setup path is providers -> models -> role assignment -> performance -> review -> ready. Provider
 enablement is a persisted user choice; installation/running health and discovered models are transient
@@ -110,11 +111,20 @@ to remote search. A model is identified by its endpoint ID plus model ID, so the
 three choices across different providers without collisions. This selection is transient; persisted
 topology still contains only role assignments and their referenced endpoints. Discovery clears old
 results before a rescan, reconciles choices that disappeared, and uses monotonically increasing
-generations so late responses cannot replace current state. Role identity is the endpoint ID plus
-model ID, which distinguishes the same model name served by different local
+generations so late responses cannot replace current state. On Models, installed inventory is combined
+across every enabled provider before search begins. One fuzzy query searches Ollama and MLX concurrently;
+installed matches remain first and each provider contributes a bounded set of remote results. Search results
+are presentation state, while selected endpoint/model references survive query changes. Role identity
+is the endpoint ID plus model ID, which distinguishes the same model name served by different local
 runtimes. Configuration is not written until review. Once the atomic save command starts, keyboard
 input is temporarily blocked so the UI cannot claim to cancel a filesystem operation already in
 progress.
+
+Selecting an online result never starts network activity. Models are downloaded only after a separate
+confirmation. Ollama uses its configured loopback pull API; MLX uses the managed runtime's Hugging Face
+CLI and private cache. Downloads report typed progress events and continue while roles are assigned.
+Review is the readiness gate: it cannot complete while downloads are active or after a failure. The
+setup draft marks a model installed only after its provider adapter reports success.
 
 Provider installation is a separate, injected capability and cannot run until the Providers screen
 receives a `y` confirmation. Ollama's official script is downloaded to a private temporary file and
@@ -139,7 +149,7 @@ assignment is required. Suggestions are defaults rather than policy: valid manua
 preserved when the user revisits Models.
 
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
-and topology. The current implementation has configuration, topology contracts, model discovery, the
-complete TUI setup/assignment flow, local model API adapters, King-led orchestration, permissioned
-tools, Markdown skills, persistent conversation memory, local model startup, and a minimal chat
-screen. Model downloads and model-server shutdown remain future milestones.
+and topology. The current implementation has configuration, topology contracts, installed and remote
+model discovery, confirmed model downloads, the complete TUI setup/assignment flow, local model API
+adapters, King-led orchestration, permissioned tools, Markdown skills, persistent conversation memory,
+local model startup, and a minimal chat screen. Model-server shutdown remains a future milestone.

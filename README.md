@@ -16,10 +16,13 @@ Ollama or MLX. Press `i` on an uninstalled provider and explicitly confirm befor
 from its official source. Ollama is then started on its configured loopback port; MLX is installed in
 Kingdom's private Python environment and starts after a model is selected. Provider setup shows named
 steps and a progress bar. Kingdom does not allow the Models screen to open until every enabled provider
-is ready. Continue to Models and select up to three choices. The role screen suggests the
-largest selected model for King and the smallest for Worker. With three choices it suggests the middle
-model for Council; with fewer choices Council starts disabled. Every suggestion can be changed before
-the reviewed configuration is atomically saved.
+is ready. Continue to Models to see installed Ollama and MLX models in one list. Press `/` to fuzzy
+search both enabled providers; installed matches stay first and online matches are marked for download.
+Select up to three choices. Kingdom asks for confirmation before downloading anything, then lets role
+assignment continue while progress is shown. The role screen suggests the largest selected model for
+King and the smallest for Worker. With three choices it suggests the middle model for Council; with
+fewer choices Council starts disabled. Every suggestion can be changed before the reviewed
+configuration is atomically saved.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
@@ -32,16 +35,11 @@ idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return
 and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
 reported without discarding an otherwise valid King response.
 
-Press `m` from setup discovery—or `Ctrl+R` while idle—to inspect local models. Use `h`/`l` to choose
-Ollama or MLX and `j`/`k` to choose an installed model. Press `s`, review the action, and
-press `y` to start it (`n` cancels). Kingdom waits for the loopback endpoint to become ready, then
-refreshes its model status. Press `Enter` on a ready model to reopen setup, rescan endpoints, and focus
-that model directly in role assignment.
-
-This stage never downloads models, binds a server beyond loopback, or stops a process. Ollama can be
-started first and then refreshed to expose its installed models. MLX models come only from complete snapshots already in the local
-Hugging Face cache and are started with offline mode enforced. Processes intentionally continue after
-Kingdom exits.
+Press `Ctrl+R` while idle to inspect or start local runtimes as a maintenance tool. Setup itself keeps
+the main journey linear: Providers → Models → Roles → Review. Ollama downloads stream progress from
+its loopback API. MLX downloads use Kingdom's managed Hugging Face tooling and private cache. Kingdom
+does not bind a server beyond loopback or stop provider processes; processes started by Kingdom
+intentionally continue after it exits.
 
 The King may also request one tool at a time. `list_files`, `read_file`, and literal `search` run
 automatically inside the directory from which Kingdom was launched. `write_file`, exact-match

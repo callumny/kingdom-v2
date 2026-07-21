@@ -14,7 +14,7 @@ import (
 )
 
 func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
-	if m.modelInventoryLoad {
+	if m.modelInventoryLoading {
 		return m, nil
 	}
 	if m.modelDownloadConfirming {
@@ -107,7 +107,7 @@ func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
 	}
 	m.modelInventoryGen++
 	generation := m.modelInventoryGen
-	m.modelInventoryLoad = true
+	m.modelInventoryLoading = true
 	m.modelCursor = 0
 	m.modelQuery = ""
 	m.modelSearchActive = false

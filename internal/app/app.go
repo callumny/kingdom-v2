@@ -57,7 +57,7 @@ type Model struct {
 	providerInstallGen      uint64
 	modelCursor             int
 	modelInventoryGen       uint64
-	modelInventoryLoad      bool
+	modelInventoryLoading   bool
 	installedModels         []setup.ModelOption
 	modelQuery              string
 	modelSearchActive       bool
@@ -275,7 +275,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.workflow == nil || m.screen != setup.StateModels || x.generation != m.modelInventoryGen {
 			return m, nil
 		}
-		m.modelInventoryLoad = false
+		m.modelInventoryLoading = false
 		m.installedModels = m.installedModelOptions(x.runtimes)
 		m.replaceVisibleModels(nil)
 		m.workflow.Draft.ReconcileModelSelection()
@@ -670,7 +670,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "esc" {
 			m.gate.Cancel()
 			m.modelInventoryGen++
-			m.modelInventoryLoad = false
+			m.modelInventoryLoading = false
 			m.localModels.preferred = nil
 			m.scanning = false
 			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateModels || m.screen == setup.StateProviders {
@@ -843,5 +843,33 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, ModelQuery: m.modelQuery, ModelSearchActive: m.modelSearchActive, ModelSearching: m.modelSearching, ModelSearchWarning: m.modelSearchWarning, ModelDownloadConfirming: m.modelDownloadConfirming, ModelDownloadActive: m.modelDownloadActive, ModelDownloadProgress: m.modelDownloadProgress, ModelDownloadError: m.modelDownloadError, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, m.presentation())
+}
+
+func (m Model) presentation() ui.Presentation {
+	return ui.Presentation{
+		ModelIndex:              m.modelIndex,
+		ModelCursor:             m.modelCursor,
+		Role:                    m.role,
+		ProviderCursor:          m.providerCursor,
+		PerfFocus:               m.perfFocus,
+		Form:                    &m.form,
+		PreviousEndpoints:       m.config.Topology.Endpoints,
+		FormActive:              m.formActive,
+		Scanning:                m.scanning,
+		ModelInventoryLoading:   m.modelInventoryLoading,
+		ModelQuery:              m.modelQuery,
+		ModelSearchActive:       m.modelSearchActive,
+		ModelSearching:          m.modelSearching,
+		ModelSearchWarning:      m.modelSearchWarning,
+		ModelDownloadConfirming: m.modelDownloadConfirming,
+		ModelDownloadActive:     m.modelDownloadActive,
+		ModelDownloadProgress:   m.modelDownloadProgress,
+		ModelDownloadError:      m.modelDownloadError,
+		Saving:                  m.saving,
+		ProviderConfirming:      m.providerConfirming,
+		ProviderInstalling:      m.providerInstalling,
+		ProviderNotice:          m.providerNotice,
+		ProviderProgress:        m.providerProgress,
+	}
 }

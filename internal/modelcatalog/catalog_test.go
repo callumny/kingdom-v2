@@ -22,15 +22,15 @@ func TestMergeRanksInstalledModelsBeforeFuzzyRemoteMatches(t *testing.T) {
 	}
 }
 
-func TestMergeUsesProviderAsPartOfIdentityAndHonoursLimit(t *testing.T) {
+func TestMergeUsesProviderIdentityAndLimitsEachProvider(t *testing.T) {
 	remote := []Model{{Provider: Ollama, ID: "same"}, {Provider: MLX, ID: "same"}, {Provider: Ollama, ID: "something"}}
-	got := MergeAndFilter(nil, remote, "s", 2)
+	got := MergeAndFilter(nil, remote, "s", 1)
 	if len(got) != 2 || got[0].Provider == got[1].Provider {
 		t.Fatalf("models=%+v", got)
 	}
 }
 
-func TestMergeKeepsEveryInstalledMatchAndLimitsOnlyRemoteMatches(t *testing.T) {
+func TestMergeKeepsEveryInstalledMatchAndLimitsRemoteMatchesPerProvider(t *testing.T) {
 	installed := []Model{
 		{Provider: Ollama, ID: "qwen-installed-1", Installed: true},
 		{Provider: Ollama, ID: "qwen-installed-2", Installed: true},
@@ -43,8 +43,8 @@ func TestMergeKeepsEveryInstalledMatchAndLimitsOnlyRemoteMatches(t *testing.T) {
 	}
 
 	got := MergeAndFilter(installed, remote, "qwen", 2)
-	if len(got) != 5 {
-		t.Fatalf("models=%+v, want 3 installed plus 2 remote", got)
+	if len(got) != 6 {
+		t.Fatalf("models=%+v, want 3 installed plus 3 provider-limited remote", got)
 	}
 	for index := 0; index < 3; index++ {
 		if !got[index].Installed {
