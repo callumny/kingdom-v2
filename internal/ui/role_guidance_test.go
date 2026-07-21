@@ -6,6 +6,7 @@ import (
 
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 )
@@ -37,6 +38,28 @@ func TestRolesViewExplainsJobsAndSizeGuidance(t *testing.T) {
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("role guidance missing %q: %s", want, view)
+		}
+	}
+}
+
+func TestRolesViewKeepsDownloadProgressInContext(t *testing.T) {
+	draft := setup.NewDraft(config.Default(), nil)
+	draft.ApplyResults([]setup.EndpointResult{{
+		Endpoint: topology.Endpoint{ID: "mlx-local", Name: "MLX"},
+		Models:   []discovery.Model{{ID: "large", ParameterSize: "14B"}},
+	}})
+	if err := draft.ToggleModel(setup.ModelRef{EndpointID: "mlx-local", ModelID: "large"}); err != nil {
+		t.Fatal(err)
+	}
+	w := &setup.Workflow{State: setup.StateRoles, Draft: draft}
+
+	view := ViewWithPresentation(100, 38, true, w, Presentation{
+		ModelDownloadActive:   true,
+		ModelDownloadProgress: localmodels.DownloadProgress{Model: "large", Status: "Downloading MLX model", Percent: 38},
+	}).Content
+	for _, want := range []string{"Downloading MLX model · 38%", "Assign roles while the model downloads", "King", "Worker", "Council (optional)"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("role download view missing %q: %s", want, view)
 		}
 	}
 }

@@ -22,9 +22,13 @@ const (
 )
 
 type Model struct {
-	ID        string
-	LocalPath string
-	Loaded    bool
+	ID            string
+	LocalPath     string
+	Loaded        bool
+	SizeBytes     int64
+	Family        string
+	ParameterSize string
+	Quantization  string
 }
 
 type Runtime struct {
@@ -168,7 +172,7 @@ func (m *Manager) StartAndWait(ctx context.Context, kind Kind, modelID string) e
 	}
 }
 
-func probe(ctx context.Context, discoverer Discoverer, endpoint topology.Endpoint) (bool, []string, error) {
+func probe(ctx context.Context, discoverer Discoverer, endpoint topology.Endpoint) (bool, []discovery.Model, error) {
 	if discoverer == nil {
 		return false, nil, errors.New("model discovery unavailable")
 	}
@@ -182,13 +186,22 @@ func probe(ctx context.Context, discoverer Discoverer, endpoint topology.Endpoin
 	if results[0].Err != nil {
 		return false, nil, results[0].Err
 	}
-	ids := make([]string, 0, len(results[0].Models))
+	models := make([]discovery.Model, 0, len(results[0].Models))
 	for _, model := range results[0].Models {
 		if id := strings.TrimSpace(model.ID); id != "" {
-			ids = append(ids, id)
+			model.ID = id
+			models = append(models, model)
 		}
 	}
-	return true, ids, nil
+	return true, models, nil
+}
+
+func discoveredModelIDs(models []discovery.Model) []string {
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		ids = append(ids, model.ID)
+	}
+	return ids
 }
 
 func normalizedModels(models []Model) []Model {

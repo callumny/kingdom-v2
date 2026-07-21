@@ -27,10 +27,17 @@ func (p *ollamaProvider) inspect(ctx context.Context) Runtime {
 		return result
 	}
 	result.Installed = true
-	running, ids, probeErr := probe(ctx, p.discoverer, p.endpoint)
+	running, models, probeErr := probe(ctx, p.discoverer, p.endpoint)
 	result.Running = running
-	for _, id := range ids {
-		result.Models = append(result.Models, Model{ID: id, Loaded: true})
+	for _, model := range models {
+		result.Models = append(result.Models, Model{
+			ID:            model.ID,
+			Loaded:        true,
+			SizeBytes:     model.SizeBytes,
+			Family:        model.Family,
+			ParameterSize: model.ParameterSize,
+			Quantization:  model.Quantization,
+		})
 	}
 	result.Models = normalizedModels(result.Models)
 	result.Warning = combineWarnings(probeErr)
@@ -75,7 +82,7 @@ func (p *mlxProvider) inspect(ctx context.Context) Runtime {
 	models, listErr := scanMLXCache(p.cacheRoot)
 	running, loaded, probeErr := probe(ctx, p.discoverer, p.endpoint)
 	result.Running = running
-	result.Models = normalizedModels(markLoaded(models, loaded))
+	result.Models = normalizedModels(markLoaded(models, discoveredModelIDs(loaded)))
 	result.Warning = combineWarnings(listErr, probeErr)
 	return result
 }

@@ -17,6 +17,9 @@ var (
 	royalGreen   = lipgloss.NewStyle().Foreground(lipgloss.Color("#78d19a"))
 	royalRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("#d46a6a"))
 	royalPointer = royalGold.Bold(true)
+	royalBadge   = lipgloss.NewStyle().Foreground(lipgloss.Color("#f4efe3")).Background(lipgloss.Color("#3b3341")).Bold(true).Padding(0, 1)
+	royalReady   = lipgloss.NewStyle().Foreground(lipgloss.Color("#17231b")).Background(lipgloss.Color("#78d19a")).Bold(true).Padding(0, 1)
+	royalPending = lipgloss.NewStyle().Foreground(lipgloss.Color("#241d10")).Background(lipgloss.Color("#e8bd61")).Bold(true).Padding(0, 1)
 )
 
 func renderRoyalShell(width, height int, progress string, body []string, footer string) string {

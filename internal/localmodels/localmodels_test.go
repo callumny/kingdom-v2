@@ -62,7 +62,7 @@ func TestInspectReportsStableProvidersWithoutLaunchingAnything(t *testing.T) {
 		paths: map[string]string{"ollama": "/bin/ollama", "mlx_lm.server": "/bin/mlx_lm.server"},
 	}
 	discoverer := fakeDiscoverer{results: map[string]discovery.Result{
-		"ollama-local": {Models: []discovery.Model{{ID: "gemma3"}}},
+		"ollama-local": {Models: []discovery.Model{{ID: "gemma3", SizeBytes: 5_200_000_000, ParameterSize: "8B", Quantization: "Q4_K_M"}}},
 		"mlx-local":    {Err: errors.New("connection refused")},
 	}}
 
@@ -76,7 +76,7 @@ func TestInspectReportsStableProvidersWithoutLaunchingAnything(t *testing.T) {
 			t.Fatalf("%s has no installation guidance", runtime.Name)
 		}
 	}
-	if !runtimes[0].Installed || !runtimes[0].Running || !reflect.DeepEqual(runtimes[0].Models, []Model{{ID: "gemma3", Loaded: true}}) {
+	if !runtimes[0].Installed || !runtimes[0].Running || !reflect.DeepEqual(runtimes[0].Models, []Model{{ID: "gemma3", Loaded: true, SizeBytes: 5_200_000_000, ParameterSize: "8B", Quantization: "Q4_K_M"}}) {
 		t.Fatalf("Ollama=%+v", runtimes[0])
 	}
 	if !runtimes[1].Installed || runtimes[1].Running || len(runtimes[1].Models) != 1 || runtimes[1].Models[0].ID != "mlx-community/Qwen-4bit" || runtimes[1].Models[0].LocalPath == "" {

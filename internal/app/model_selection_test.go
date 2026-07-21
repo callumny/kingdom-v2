@@ -218,7 +218,7 @@ func TestModelsScreenLoadsInstalledInventoryAcrossEnabledProviders(t *testing.T)
 			Name:      "Ollama",
 			Installed: true,
 			Running:   true,
-			Models:    []localmodels.Model{{ID: "qwen3:8b", Loaded: true}},
+			Models:    []localmodels.Model{{ID: "qwen3:8b", Loaded: true, SizeBytes: 5_200_000_000, ParameterSize: "8B", Quantization: "Q4_K_M"}},
 			Endpoint:  topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:11434"},
 		},
 		{
@@ -249,7 +249,7 @@ func TestModelsScreenLoadsInstalledInventoryAcrossEnabledProviders(t *testing.T)
 
 	m, _ = update(m, command())
 	view := m.View().Content
-	for _, want := range []string{"qwen3:8b", "mlx-community/Qwen3-4B-4bit", "mlx-community/Mistral-7B-4bit", "Ollama", "MLX"} {
+	for _, want := range []string{"qwen3:8b", "8B", "5.2 GB", "Q4_K_M", "mlx-community/Qwen3-4B-4bit", "mlx-community/Mistral-7B-4bit", "Ollama", "MLX"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("combined inventory missing %q: %s", want, view)
 		}

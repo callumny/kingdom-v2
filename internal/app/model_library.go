@@ -273,9 +273,13 @@ func (m Model) installedModelOptions(runtimes []localmodels.Runtime) []setup.Mod
 		}
 		for _, model := range runtime.Models {
 			options = append(options, setup.ModelOption{
-				Ref:       setup.ModelRef{EndpointID: endpointID, ModelID: model.ID},
-				Endpoint:  endpoint,
-				Installed: true,
+				Ref:           setup.ModelRef{EndpointID: endpointID, ModelID: model.ID},
+				Endpoint:      endpoint,
+				Installed:     true,
+				SizeBytes:     model.SizeBytes,
+				Family:        model.Family,
+				ParameterSize: model.ParameterSize,
+				Quantization:  model.Quantization,
 			})
 		}
 	}

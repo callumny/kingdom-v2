@@ -83,23 +83,18 @@ func providerProgressBar(completed, total int) string {
 
 func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	selected := wf.Draft.SelectedModels()
-	body := []string{royalBrand.Render("Choose your models"), ""}
-	body = append(body, styledParagraph("Choose up to three models from any provider. A mix of sizes gives Kingdom flexible options for different jobs.", 88, royalMuted)...)
 	if p.ModelDownloadConfirming {
-		pending := wf.Draft.PendingDownloads()
-		title := "Download selected models?"
-		if len(pending) == 1 {
-			title = "Download selected model?"
-		}
-		body = []string{royalBrand.Render(title), ""}
-		body = append(body, styledParagraph("Kingdom will download only the models you do not already have. Downloads start after you confirm; installed models are left untouched.", 88, royalMuted)...)
-		body = append(body, "")
-		for _, option := range pending {
-			body = append(body, royalText.Render(fmt.Sprintf("• %-12s  %s", option.Endpoint.Name, option.Ref.ModelID)))
-		}
-		body = append(body, "", royalMuted.Render("You can assign roles while these models download."))
-		return body, royalMuted.Render("y / Enter Confirm and continue   •   n / Esc Back")
+		return modelDownloadConfirmation(wf)
 	}
+	searching := p.ModelSearchActive || p.ModelQuery != ""
+	title := "Choose your models"
+	description := "Installed Ollama and MLX models appear together. Select up to three; a mix of sizes works well for different jobs."
+	if searching {
+		title = "Search models"
+		description = "One fuzzy search covers both selected providers. Every result keeps its provider and installation state visible."
+	}
+	body := []string{royalBrand.Render(title), ""}
+	body = append(body, styledParagraph(description, 88, royalMuted)...)
 	if p.ModelInventoryLoading {
 		body = append(body, "", royalCyan.Render("Checking installed models across your selected providers…"))
 		return body, royalMuted.Render("Checking installed models…   •   Esc Back")
@@ -117,29 +112,28 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	}
 	body = append(body, "", royalCyan.Render(fmt.Sprintf("%d of %d selected", len(selected), setup.MaxSelectedModels)), "")
 	catalog := wf.Draft.Catalog()
+	if len(selected) == setup.MaxSelectedModels {
+		body = append(body, selectionSummary(selected)...)
+	}
+	if searching && p.ModelQuery != "" {
+		body = append(body, searchResultsSummary(catalog, p.ModelQuery))
+	} else {
+		body = append(body, installedResultsSummary(catalog))
+	}
 	start, end := modelWindow(len(catalog), p.ModelCursor)
 	for offset, option := range catalog[start:end] {
 		index := start + offset
-		pointer := "  "
-		if index == p.ModelCursor {
-			pointer = royalPointer.Render("› ")
-		}
-		checked := "[ ]"
-		if wf.Draft.IsModelSelected(option.Ref) {
-			checked = "[✓]"
-		}
-		label := fmt.Sprintf("%-12s  %-30s", option.Endpoint.Name, option.Ref.ModelID)
-		state := "Download"
-		if option.Installed {
-			state = "Installed"
-		}
-		body = append(body, pointer+royalText.Render(checked+" "+label)+"  "+royalMuted.Render(state+" · "+modelMetadata(option)))
+		body = append(body, modelOptionRow(option, index == p.ModelCursor, wf.Draft.IsModelSelected(option.Ref)))
 	}
 	if len(catalog) > modelWindowSize {
 		body = append(body, "", royalMuted.Render(fmt.Sprintf("Showing %d–%d of %d", start+1, end, len(catalog))))
 	}
 	if len(catalog) == 0 && !p.Scanning {
 		body = append(body, royalMuted.Render("No installed models found. Press / to search Ollama and MLX."))
+	} else if searching {
+		body = append(body, "", royalMuted.Render("Installed fuzzy matches rank first. Up to ten online matches per provider follow."))
+	} else {
+		body = append(body, "", royalMuted.Render("Installed models are always shown first."))
 	}
 	if p.Scanning {
 		body = append(body, royalCyan.Render("Refreshing available models…"))
@@ -147,14 +141,127 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if wf.Err != nil {
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
-	footer := "/ Search   •   ↑↓ Move   •   Space Toggle   •   Enter Continue   •   Esc Back"
+	footer := "/ Search   •   ↑↓ Move   •   Space Select   •   Enter Continue   •   Esc Back"
 	if p.ModelSearchActive {
-		footer = "Type to search   •   ↑↓ Move   •   Enter Finish search   •   Esc Clear"
+		footer = "Type to filter   •   ↑↓ Move   •   Space Select   •   Enter Finish search   •   Esc Clear"
 	}
 	if p.Scanning {
 		footer = "Refreshing models…   •   Esc Back"
 	}
 	return body, royalMuted.Render(footer)
+}
+
+func modelDownloadConfirmation(wf *setup.Workflow) ([]string, string) {
+	pending := wf.Draft.PendingDownloads()
+	title := "Download selected models?"
+	if len(pending) == 1 {
+		title = "Download selected model?"
+	}
+	body := []string{royalBrand.Render(title), ""}
+	body = append(body, styledParagraph("Kingdom will download only the missing models. Your installed choices stay untouched.", 88, royalMuted)...)
+	body = append(body, "")
+	for _, option := range pending {
+		body = append(body, modelOptionRow(option, false, true))
+	}
+	body = append(body,
+		"",
+		royalGold.Render("What happens next"),
+		royalMuted.Render("The download starts in the background. You can assign roles while Kingdom tracks progress."),
+	)
+	return body, royalMuted.Render("Enter / y Confirm and continue   •   Esc / n Back")
+}
+
+func installedResultsSummary(catalog []setup.ModelOption) string {
+	return royalText.Render("Installed models") + "  " + royalMuted.Render(fmt.Sprintf("%d found across %d providers", len(catalog), providerCount(catalog)))
+}
+
+func searchResultsSummary(catalog []setup.ModelOption, query string) string {
+	providers := providerLabels(catalog)
+	parts := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		parts = append(parts, royalBadge.Render(provider+" ✓"))
+	}
+	label := fmt.Sprintf("Results for “%s”", query)
+	return royalText.Render(label) + "  " + strings.Join(parts, " ") + "  " + royalMuted.Render(fmt.Sprintf("%d matches", len(catalog)))
+}
+
+func selectionSummary(selected []setup.ModelOption) []string {
+	sizes := make([]string, 0, len(selected))
+	for _, option := range selected {
+		if option.ParameterSize != "" {
+			sizes = append(sizes, option.ParameterSize)
+		}
+	}
+	detail := "Bigger models are generally stronger, but slower and use more RAM."
+	if len(sizes) == len(selected) {
+		detail = "A useful spread: " + strings.Join(sizes, " · ") + ". " + detail
+	}
+	pending := 0
+	for _, option := range selected {
+		if !option.Installed {
+			pending++
+		}
+	}
+	lines := []string{royalGold.Render(fmt.Sprintf("%d models selected", len(selected)))}
+	lines = append(lines, styledParagraph(detail, 88, royalMuted)...)
+	if pending > 0 {
+		label := fmt.Sprintf("%d downloads required", pending)
+		if pending == 1 {
+			label = "One download required"
+		}
+		lines = append(lines, royalPending.Render(label)+"  "+royalMuted.Render("Continuing asks for confirmation before using the network or disk."), "")
+	}
+	return lines
+}
+
+func modelOptionRow(option setup.ModelOption, focused, selected bool) string {
+	pointer := "  "
+	border := royalRule.Render("│")
+	if focused {
+		pointer = royalPointer.Render("› ")
+		border = royalGold.Render("│")
+	}
+	checked := "[ ]"
+	if selected {
+		checked = "[✓]"
+	}
+	state := royalPending.Render("Download")
+	if option.Installed {
+		state = royalReady.Render("Installed")
+	}
+	provider := option.Endpoint.Name
+	if provider == "" {
+		provider = option.Ref.EndpointID
+	}
+	return pointer + border + " " + royalText.Render(checked) + " " + royalBadge.Render(provider) + " " + state + " " + royalText.Render(option.Ref.ModelID) + "  " + royalMuted.Render(modelMetadata(option))
+}
+
+func providerCount(catalog []setup.ModelOption) int {
+	return len(providerLabels(catalog))
+}
+
+func providerLabels(catalog []setup.ModelOption) []string {
+	seen := make(map[string]bool)
+	labels := make([]string, 0, 2)
+	for _, preferred := range []string{"Ollama", "MLX"} {
+		for _, option := range catalog {
+			if option.Endpoint.Name == preferred && !seen[preferred] {
+				seen[preferred] = true
+				labels = append(labels, preferred)
+			}
+		}
+	}
+	for _, option := range catalog {
+		label := option.Endpoint.Name
+		if label == "" {
+			label = option.Ref.EndpointID
+		}
+		if label != "" && !seen[label] {
+			seen[label] = true
+			labels = append(labels, label)
+		}
+	}
+	return labels
 }
 
 const modelWindowSize = 8

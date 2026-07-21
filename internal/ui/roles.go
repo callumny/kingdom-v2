@@ -22,6 +22,7 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 			royalCyan.Render(fmt.Sprintf("%s · %d%%", status, p.ModelDownloadProgress.Percent)),
 			providerProgressBar(p.ModelDownloadProgress.Percent, 100),
 			royalMuted.Render(p.ModelDownloadProgress.Model),
+			royalMuted.Render("Assign roles while the model downloads. Kingdom waits before the main prompt only if something is incomplete."),
 			"",
 		)
 	}
@@ -29,9 +30,9 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		body = append(body, royalRed.Render("Download failed: "+p.ModelDownloadError), "")
 	}
 	body = append(body,
-		royalText.Render("King")+royalMuted.Render(" — plans and coordinates; a larger model is usually a good fit."),
-		royalText.Render("Worker")+royalMuted.Render(" — handles focused tasks; a smaller model is usually faster."),
-		royalText.Render("Council")+royalMuted.Render(" — provides independent review; a different model adds perspective."),
+		roleCard("King", "plans and coordinates; a larger model is usually a good fit."),
+		roleCard("Worker", "handles focused tasks; a smaller model is usually faster."),
+		roleCard("Council (optional)", "provides independent review; a different model adds perspective."),
 		"",
 		royalGold.Render("Editing: "+roleName),
 		royalMuted.Render("Press 1 for King, 2 for Worker, 3 for Council, or 0 to disable the Council."),
@@ -56,6 +57,10 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		body = append(body, "Council: "+assignmentLabel(roles.Council, wf))
 	}
 	return body, royalMuted.Render("↑↓ Move   •   Enter Assign   •   n Continue   •   Esc Back")
+}
+
+func roleCard(name, description string) string {
+	return royalRule.Render("│") + " " + royalText.Bold(true).Render(name) + royalMuted.Render(" — "+description)
 }
 
 func assignmentLabel(assignment topology.Assignment, wf *setup.Workflow) string {
