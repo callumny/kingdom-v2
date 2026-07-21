@@ -47,6 +47,9 @@ func (d Draft) Catalog() []ModelOption {
 // Model identity includes the endpoint because names may overlap across
 // providers.
 func (d *Draft) ReplaceCatalog(options []ModelOption) {
+	if d.selectedOptions == nil {
+		d.selectedOptions = make(map[ModelRef]ModelOption)
+	}
 	seen := make(map[ModelRef]bool)
 	normalized := make([]ModelOption, 0, len(options))
 	for _, option := range options {
@@ -57,6 +60,9 @@ func (d *Draft) ReplaceCatalog(options []ModelOption) {
 		}
 		seen[option.Ref] = true
 		normalized = append(normalized, option)
+		if d.IsModelSelected(option.Ref) {
+			d.selectedOptions[option.Ref] = option
+		}
 	}
 	d.catalog = normalized
 }
@@ -87,6 +93,7 @@ func (d *Draft) ToggleModel(ref ModelRef) error {
 	for index, selected := range d.selectedModels {
 		if selected == ref {
 			d.selectedModels = append(d.selectedModels[:index], d.selectedModels[index+1:]...)
+			delete(d.selectedOptions, ref)
 			return nil
 		}
 	}
@@ -95,6 +102,15 @@ func (d *Draft) ToggleModel(ref ModelRef) error {
 	}
 	if len(d.selectedModels) >= MaxSelectedModels {
 		return fmt.Errorf("select up to %d models", MaxSelectedModels)
+	}
+	for _, option := range d.Catalog() {
+		if option.Ref == ref {
+			if d.selectedOptions == nil {
+				d.selectedOptions = make(map[ModelRef]ModelOption)
+			}
+			d.selectedOptions[ref] = option
+			break
+		}
 	}
 	d.selectedModels = append(d.selectedModels, ref)
 	return nil
@@ -115,6 +131,9 @@ func (d Draft) SelectedModels() []ModelOption {
 	for _, option := range d.Catalog() {
 		byRef[option.Ref] = option
 	}
+	for ref, option := range d.selectedOptions {
+		byRef[ref] = option
+	}
 	selected := make([]ModelOption, 0, len(d.selectedModels))
 	for _, ref := range d.selectedModels {
 		if option, exists := byRef[ref]; exists {
@@ -122,6 +141,17 @@ func (d Draft) SelectedModels() []ModelOption {
 		}
 	}
 	return selected
+}
+
+// PendingDownloads returns selected online models in selection order.
+func (d Draft) PendingDownloads() []ModelOption {
+	pending := make([]ModelOption, 0)
+	for _, option := range d.SelectedModels() {
+		if !option.Installed {
+			pending = append(pending, option)
+		}
+	}
+	return pending
 }
 
 // ReconcileModelSelection removes choices that disappeared on a rescan.
@@ -137,6 +167,7 @@ func (d *Draft) ReconcileModelSelection() []ModelRef {
 			kept = append(kept, ref)
 		} else {
 			removed = append(removed, ref)
+			delete(d.selectedOptions, ref)
 		}
 	}
 	d.selectedModels = kept

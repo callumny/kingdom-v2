@@ -85,6 +85,21 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	selected := wf.Draft.SelectedModels()
 	body := []string{royalBrand.Render("Choose your models"), ""}
 	body = append(body, styledParagraph("Choose up to three models from any provider. A mix of sizes gives Kingdom flexible options for different jobs.", 88, royalMuted)...)
+	if p.ModelDownloadConfirming {
+		pending := wf.Draft.PendingDownloads()
+		title := "Download selected models?"
+		if len(pending) == 1 {
+			title = "Download selected model?"
+		}
+		body = []string{royalBrand.Render(title), ""}
+		body = append(body, styledParagraph("Kingdom will download only the models you do not already have. Downloads start after you confirm; installed models are left untouched.", 88, royalMuted)...)
+		body = append(body, "")
+		for _, option := range pending {
+			body = append(body, royalText.Render(fmt.Sprintf("• %-12s  %s", option.Endpoint.Name, option.Ref.ModelID)))
+		}
+		body = append(body, "", royalMuted.Render("You can assign roles while these models download."))
+		return body, royalMuted.Render("y / Enter Confirm and continue   •   n / Esc Back")
+	}
 	if p.ModelInventoryLoading {
 		body = append(body, "", royalCyan.Render("Checking installed models across your selected providers…"))
 		return body, royalMuted.Render("Checking installed models…   •   Esc Back")

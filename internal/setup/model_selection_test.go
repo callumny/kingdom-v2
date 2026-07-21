@@ -67,6 +67,34 @@ func TestCatalogCanUseInstalledInventoryWithoutChangingProviderHealth(t *testing
 	}
 }
 
+func TestSelectedOnlineModelSurvivesAChangedVisibleSearchCatalog(t *testing.T) {
+	draft := selectionDraft()
+	online := ModelOption{
+		Ref:       ModelRef{EndpointID: "mlx-local", ModelID: "mlx-community/online-model"},
+		Endpoint:  topology.Endpoint{ID: "mlx-local", Name: "MLX"},
+		Installed: false,
+	}
+	draft.ReplaceCatalog([]ModelOption{online})
+	if err := draft.ToggleModel(online.Ref); err != nil {
+		t.Fatal(err)
+	}
+
+	draft.ReplaceCatalog([]ModelOption{{
+		Ref:       ModelRef{EndpointID: "ollama-local", ModelID: "different-result"},
+		Endpoint:  topology.Endpoint{ID: "ollama-local", Name: "Ollama"},
+		Installed: false,
+	}})
+
+	selected := draft.SelectedModels()
+	if len(selected) != 1 || selected[0].Ref != online.Ref || selected[0].Installed {
+		t.Fatalf("selected=%+v", selected)
+	}
+	pending := draft.PendingDownloads()
+	if len(pending) != 1 || pending[0].Ref != online.Ref {
+		t.Fatalf("pending=%+v", pending)
+	}
+}
+
 func TestWorkflowIncludesModelsBetweenProvidersAndRoles(t *testing.T) {
 	draft := selectionDraft()
 	w := &Workflow{State: StateProviders, Draft: draft}

@@ -20,55 +20,56 @@ import (
 )
 
 type Model struct {
-	width, height      int
-	config             config.Config
-	setup              bool
-	workflow           *setup.Workflow
-	defaults           []topology.Endpoint
-	discover           func(context.Context, uint64, []topology.Endpoint) tea.Cmd
-	save               func(config.Config) error
-	screen             setup.WorkflowState
-	role               int
-	modelIndex         int
-	gate               *setup.GenerationGate
-	form               ui.CustomEndpointForm
-	formActive         bool
-	chat               ui.ChatInput
-	history            []string
-	progress           string
-	chatError          string
-	run                RunFunc
-	runCancel          context.CancelFunc
-	runCh              <-chan orchestration.Event
-	runGen             uint64
-	running            bool
-	approval           *orchestration.ApprovalRequest
-	skills             skillState
-	memory             memoryState
-	localModels        localModelState
-	installer          ProviderInstaller
-	modelSearch        ModelSearcher
-	providerCursor     int
-	providerConfirming bool
-	providerInstalling bool
-	providerNotice     string
-	providerProgress   localmodels.InstallProgress
-	providerInstallCh  <-chan providerInstallEvent
-	providerInstallGen uint64
-	modelCursor        int
-	modelInventoryGen  uint64
-	modelInventoryLoad bool
-	installedModels    []setup.ModelOption
-	modelQuery         string
-	modelSearchActive  bool
-	modelSearching     bool
-	modelSearchWarning string
-	modelSearchGen     uint64
-	modelSearchCancel  context.CancelFunc
-	perfFocus          int
-	scanning           bool
-	saveGen            uint64
-	saving             bool
+	width, height           int
+	config                  config.Config
+	setup                   bool
+	workflow                *setup.Workflow
+	defaults                []topology.Endpoint
+	discover                func(context.Context, uint64, []topology.Endpoint) tea.Cmd
+	save                    func(config.Config) error
+	screen                  setup.WorkflowState
+	role                    int
+	modelIndex              int
+	gate                    *setup.GenerationGate
+	form                    ui.CustomEndpointForm
+	formActive              bool
+	chat                    ui.ChatInput
+	history                 []string
+	progress                string
+	chatError               string
+	run                     RunFunc
+	runCancel               context.CancelFunc
+	runCh                   <-chan orchestration.Event
+	runGen                  uint64
+	running                 bool
+	approval                *orchestration.ApprovalRequest
+	skills                  skillState
+	memory                  memoryState
+	localModels             localModelState
+	installer               ProviderInstaller
+	modelSearch             ModelSearcher
+	providerCursor          int
+	providerConfirming      bool
+	providerInstalling      bool
+	providerNotice          string
+	providerProgress        localmodels.InstallProgress
+	providerInstallCh       <-chan providerInstallEvent
+	providerInstallGen      uint64
+	modelCursor             int
+	modelInventoryGen       uint64
+	modelInventoryLoad      bool
+	installedModels         []setup.ModelOption
+	modelQuery              string
+	modelSearchActive       bool
+	modelSearching          bool
+	modelSearchWarning      string
+	modelSearchGen          uint64
+	modelSearchCancel       context.CancelFunc
+	modelDownloadConfirming bool
+	perfFocus               int
+	scanning                bool
+	saveGen                 uint64
+	saving                  bool
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
@@ -531,7 +532,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form, cmd = m.form.Update(msg)
 			return m, cmd
 		}
-		if m.setup && m.screen == setup.StateModels && m.modelSearchActive {
+		if m.setup && m.screen == setup.StateModels && (m.modelSearchActive || m.modelDownloadConfirming) {
 			return m.handleModelsKey(key)
 		}
 		if m.setup && key == "q" {
@@ -786,5 +787,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, ModelQuery: m.modelQuery, ModelSearchActive: m.modelSearchActive, ModelSearching: m.modelSearching, ModelSearchWarning: m.modelSearchWarning, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, ModelQuery: m.modelQuery, ModelSearchActive: m.modelSearchActive, ModelSearching: m.modelSearching, ModelSearchWarning: m.modelSearchWarning, ModelDownloadConfirming: m.modelDownloadConfirming, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
 }

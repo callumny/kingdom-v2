@@ -90,11 +90,12 @@ func EndpointIdentity(endpointID, model string) string {
 func DedupeEndpoints(eps []topology.Endpoint) []topology.Endpoint { return MergeCandidates(nil, eps) }
 
 type Draft struct {
-	Config         config.Config
-	Results        []EndpointResult
-	selectedModels []ModelRef
-	providerReady  map[string]bool
-	catalog        []ModelOption
+	Config          config.Config
+	Results         []EndpointResult
+	selectedModels  []ModelRef
+	selectedOptions map[ModelRef]ModelOption
+	providerReady   map[string]bool
+	catalog         []ModelOption
 }
 
 func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
@@ -107,9 +108,10 @@ func NewDraft(existing config.Config, defaults []topology.Endpoint) Draft {
 		c.WorkerConcurrency = 4
 	}
 	return Draft{
-		Config:         c,
-		selectedModels: selectedRoleModels(existing.Topology.Roles),
-		providerReady:  make(map[string]bool),
+		Config:          c,
+		selectedModels:  selectedRoleModels(existing.Topology.Roles),
+		selectedOptions: make(map[ModelRef]ModelOption),
+		providerReady:   make(map[string]bool),
 	}
 }
 

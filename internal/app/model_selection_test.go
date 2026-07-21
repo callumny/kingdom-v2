@@ -92,6 +92,42 @@ func TestModelsSearchIgnoresResultsFromAnOlderQuery(t *testing.T) {
 	}
 }
 
+func TestContinuingWithOnlineModelsRequiresDownloadConfirmation(t *testing.T) {
+	searcher := &fakeModelSearcher{results: map[modelcatalog.Provider][]modelcatalog.Model{
+		modelcatalog.Ollama: {{Provider: modelcatalog.Ollama, ID: "qwen3:14b"}},
+	}}
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "qwen3:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+	}}}
+	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelSearch: searcher})
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0]}})
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
+	m, inventory := update(m, key("enter"))
+	m, _ = update(m, inventory())
+	m, _ = update(m, key("/"))
+	m, search := update(m, key("q"))
+	m, _ = update(m, search())
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key(" "))
+	m, _ = update(m, key("enter")) // finish search
+	m, _ = update(m, key("enter")) // continue from Models
+
+	view := m.View().Content
+	if m.screen != setup.StateModels || !strings.Contains(view, "Download selected model?") || !strings.Contains(view, "qwen3:14b") {
+		t.Fatalf("missing download confirmation: screen=%v view=%s", m.screen, view)
+	}
+	m, _ = update(m, key("n"))
+	if strings.Contains(m.View().Content, "Download selected model?") {
+		t.Fatalf("download confirmation did not close: %s", m.View().Content)
+	}
+	m, _ = update(m, key("enter"))
+	m, _ = update(m, key("y"))
+	if m.screen != setup.StateRoles {
+		t.Fatalf("confirmed selection did not advance: screen=%v", m.screen)
+	}
+}
+
 func modelAtModelsScreen(t *testing.T, manager LocalModelManager, searcher ModelSearcher) Model {
 	t.Helper()
 	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelSearch: searcher})

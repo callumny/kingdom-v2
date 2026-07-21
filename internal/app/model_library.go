@@ -17,6 +17,16 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 	if m.modelInventoryLoad {
 		return m, nil
 	}
+	if m.modelDownloadConfirming {
+		switch key {
+		case "y", "enter":
+			m.modelDownloadConfirming = false
+			return m.advanceFromModels()
+		case "n", "esc":
+			m.modelDownloadConfirming = false
+		}
+		return m, nil
+	}
 	if key == "/" && !m.modelSearchActive {
 		m.modelSearchActive = true
 		m.modelSearchWarning = ""
@@ -40,7 +50,7 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 				m.modelQuery = m.modelQuery[:len(m.modelQuery)-size]
 			}
 			return m.beginModelSearch()
-		case "up", "k", "down", "j":
+		case "up", "k", "down", "j", " ", "space":
 			// Search remains focused while the result cursor moves below.
 		default:
 			if len([]rune(key)) == 1 {
@@ -65,18 +75,29 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 			m.workflow.Err = m.workflow.Draft.ToggleModel(catalog[m.modelCursor].Ref)
 		}
 	case "enter":
-		if m.scanning {
+		if len(m.workflow.Draft.SelectedModels()) == 0 {
+			m.workflow.Err = fmt.Errorf("select at least one model")
 			return m, nil
 		}
-		if err := m.workflow.Continue(); err != nil {
-			m.workflow.Err = err
+		if len(m.workflow.Draft.PendingDownloads()) > 0 {
+			m.modelDownloadConfirming = true
+			m.workflow.Err = nil
 			return m, nil
 		}
-		m.workflow.Err = nil
-		m.modelIndex = 0
-		m.screen = m.workflow.State
-		m.cancelModelSearch()
+		return m.advanceFromModels()
 	}
+	return m, nil
+}
+
+func (m Model) advanceFromModels() (tea.Model, tea.Cmd) {
+	if err := m.workflow.Continue(); err != nil {
+		m.workflow.Err = err
+		return m, nil
+	}
+	m.workflow.Err = nil
+	m.modelIndex = 0
+	m.screen = m.workflow.State
+	m.cancelModelSearch()
 	return m, nil
 }
 
@@ -90,6 +111,7 @@ func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
 	m.modelCursor = 0
 	m.modelQuery = ""
 	m.modelSearchActive = false
+	m.modelDownloadConfirming = false
 	m.cancelModelSearch()
 	m.workflow.Err = nil
 	m.workflow.Draft.ReplaceCatalog([]setup.ModelOption{})
