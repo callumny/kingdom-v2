@@ -1,0 +1,261 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"unicode/utf8"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/callumny/kingdom/internal/localmodels"
+	"github.com/callumny/kingdom/internal/modelcatalog"
+	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/topology"
+)
+
+func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
+	if m.modelInventoryLoad {
+		return m, nil
+	}
+	if key == "/" && !m.modelSearchActive {
+		m.modelSearchActive = true
+		m.modelSearchWarning = ""
+		return m, nil
+	}
+	if m.modelSearchActive {
+		switch key {
+		case "esc":
+			if m.modelQuery == "" {
+				m.modelSearchActive = false
+				return m, nil
+			}
+			m.modelQuery = ""
+			return m.beginModelSearch()
+		case "enter":
+			m.modelSearchActive = false
+			return m, nil
+		case "backspace":
+			if m.modelQuery != "" {
+				_, size := utf8.DecodeLastRuneInString(m.modelQuery)
+				m.modelQuery = m.modelQuery[:len(m.modelQuery)-size]
+			}
+			return m.beginModelSearch()
+		case "up", "k", "down", "j":
+			// Search remains focused while the result cursor moves below.
+		default:
+			if len([]rune(key)) == 1 {
+				m.modelQuery += key
+				return m.beginModelSearch()
+			}
+			return m, nil
+		}
+	}
+	catalog := m.workflow.Draft.Catalog()
+	switch key {
+	case "up", "k":
+		if m.modelCursor > 0 {
+			m.modelCursor--
+		}
+	case "down", "j":
+		if m.modelCursor+1 < len(catalog) {
+			m.modelCursor++
+		}
+	case " ", "space":
+		if m.modelCursor >= 0 && m.modelCursor < len(catalog) {
+			m.workflow.Err = m.workflow.Draft.ToggleModel(catalog[m.modelCursor].Ref)
+		}
+	case "enter":
+		if m.scanning {
+			return m, nil
+		}
+		if err := m.workflow.Continue(); err != nil {
+			m.workflow.Err = err
+			return m, nil
+		}
+		m.workflow.Err = nil
+		m.modelIndex = 0
+		m.screen = m.workflow.State
+		m.cancelModelSearch()
+	}
+	return m, nil
+}
+
+func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
+	if m.localModels.manager == nil {
+		return m, nil
+	}
+	m.modelInventoryGen++
+	generation := m.modelInventoryGen
+	m.modelInventoryLoad = true
+	m.modelCursor = 0
+	m.modelQuery = ""
+	m.modelSearchActive = false
+	m.cancelModelSearch()
+	m.workflow.Err = nil
+	m.workflow.Draft.ReplaceCatalog([]setup.ModelOption{})
+	manager := m.localModels.manager
+	return m, func() tea.Msg {
+		return modelInventoryMsg{generation: generation, runtimes: manager.Inspect(context.Background())}
+	}
+}
+
+func (m Model) beginModelSearch() (tea.Model, tea.Cmd) {
+	m.cancelModelSearch()
+	m.modelSearchGen++
+	generation := m.modelSearchGen
+	m.modelSearchWarning = ""
+	m.replaceVisibleModels(nil)
+	if strings.TrimSpace(m.modelQuery) == "" || m.modelSearch == nil {
+		m.modelSearching = false
+		return m, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.modelSearchCancel = cancel
+	m.modelSearching = true
+	query := m.modelQuery
+	searcher := m.modelSearch
+	providers := m.enabledModelProviders()
+	return m, func() tea.Msg {
+		type providerResult struct {
+			provider modelcatalog.Provider
+			models   []modelcatalog.Model
+			err      error
+		}
+		results := make(chan providerResult, len(providers))
+		for _, provider := range providers {
+			go func(provider modelcatalog.Provider) {
+				models, err := searcher.Search(ctx, provider, query, 10)
+				results <- providerResult{provider: provider, models: models, err: err}
+			}(provider)
+		}
+		message := modelSearchMsg{generation: generation}
+		for range providers {
+			result := <-results
+			if result.err != nil {
+				if ctx.Err() == nil {
+					message.warnings = append(message.warnings, fmt.Sprintf("%s search: %v", providerLabel(result.provider), result.err))
+				}
+				continue
+			}
+			message.models = append(message.models, result.models...)
+		}
+		return message
+	}
+}
+
+func (m *Model) cancelModelSearch() {
+	if m.modelSearchCancel != nil {
+		m.modelSearchCancel()
+	}
+	m.modelSearchCancel = nil
+	m.modelSearching = false
+}
+
+func (m Model) enabledModelProviders() []modelcatalog.Provider {
+	providers := make([]modelcatalog.Provider, 0, 2)
+	if m.workflow.Draft.Config.Providers.Ollama.Enabled {
+		providers = append(providers, modelcatalog.Ollama)
+	}
+	if m.workflow.Draft.Config.Providers.MLX.Enabled {
+		providers = append(providers, modelcatalog.MLX)
+	}
+	return providers
+}
+
+func (m *Model) replaceVisibleModels(remote []modelcatalog.Model) {
+	installed := make([]modelcatalog.Model, 0, len(m.installedModels))
+	installedOptions := make(map[setup.ModelRef]setup.ModelOption, len(m.installedModels))
+	for _, option := range m.installedModels {
+		provider, ok := providerForEndpoint(option.Ref.EndpointID)
+		if !ok {
+			continue
+		}
+		installed = append(installed, modelcatalog.Model{Provider: provider, ID: option.Ref.ModelID, Installed: true})
+		installedOptions[option.Ref] = option
+	}
+	merged := modelcatalog.MergeAndFilter(installed, remote, m.modelQuery, 10)
+	options := make([]setup.ModelOption, 0, len(merged))
+	for _, model := range merged {
+		endpointID := endpointForProvider(model.Provider)
+		ref := setup.ModelRef{EndpointID: endpointID, ModelID: model.ID}
+		if installedOption, exists := installedOptions[ref]; exists {
+			options = append(options, installedOption)
+			continue
+		}
+		options = append(options, setup.ModelOption{Ref: ref, Endpoint: m.configuredEndpoint(endpointID), Installed: false})
+	}
+	m.workflow.Draft.ReplaceCatalog(options)
+}
+
+func (m Model) configuredEndpoint(endpointID string) topology.Endpoint {
+	for _, endpoint := range m.workflow.Draft.Config.Topology.Endpoints {
+		if endpoint.ID == endpointID {
+			return endpoint
+		}
+	}
+	return topology.Endpoint{ID: endpointID, Name: providerLabel(providerFromEndpoint(endpointID))}
+}
+
+func providerForEndpoint(endpointID string) (modelcatalog.Provider, bool) {
+	switch endpointID {
+	case setup.OllamaEndpointID:
+		return modelcatalog.Ollama, true
+	case setup.MLXEndpointID:
+		return modelcatalog.MLX, true
+	default:
+		return "", false
+	}
+}
+
+func providerFromEndpoint(endpointID string) modelcatalog.Provider {
+	provider, _ := providerForEndpoint(endpointID)
+	return provider
+}
+
+func endpointForProvider(provider modelcatalog.Provider) string {
+	if provider == modelcatalog.MLX {
+		return setup.MLXEndpointID
+	}
+	return setup.OllamaEndpointID
+}
+
+func providerLabel(provider modelcatalog.Provider) string {
+	if provider == modelcatalog.MLX {
+		return "MLX"
+	}
+	return "Ollama"
+}
+
+func (m Model) installedModelOptions(runtimes []localmodels.Runtime) []setup.ModelOption {
+	endpoints := make(map[string]topology.Endpoint)
+	for _, endpoint := range m.workflow.Draft.Config.Topology.Endpoints {
+		endpoints[endpoint.ID] = endpoint
+	}
+	options := make([]setup.ModelOption, 0)
+	for _, runtime := range runtimes {
+		endpointID := runtime.Endpoint.ID
+		if endpointID == "" {
+			switch runtime.Kind {
+			case localmodels.KindOllama:
+				endpointID = setup.OllamaEndpointID
+			case localmodels.KindMLX:
+				endpointID = setup.MLXEndpointID
+			}
+		}
+		if !m.workflow.Draft.ProviderEnabled(endpointID) {
+			continue
+		}
+		endpoint := runtime.Endpoint
+		if configured, exists := endpoints[endpointID]; exists {
+			endpoint = configured
+		}
+		for _, model := range runtime.Models {
+			options = append(options, setup.ModelOption{
+				Ref:       setup.ModelRef{EndpointID: endpointID, ModelID: model.ID},
+				Endpoint:  endpoint,
+				Installed: true,
+			})
+		}
+	}
+	return options
+}

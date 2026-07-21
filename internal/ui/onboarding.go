@@ -89,6 +89,17 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		body = append(body, "", royalCyan.Render("Checking installed models across your selected providers…"))
 		return body, royalMuted.Render("Checking installed models…   •   Esc Back")
 	}
+	searchPrompt := "Press / to search Ollama and MLX"
+	if p.ModelSearchActive || p.ModelQuery != "" {
+		searchPrompt = "Search: " + p.ModelQuery + "▏"
+	}
+	body = append(body, "", royalText.Render(searchPrompt))
+	if p.ModelSearching {
+		body = append(body, royalCyan.Render("Searching Ollama and MLX…"))
+	}
+	if p.ModelSearchWarning != "" {
+		body = append(body, royalGold.Render(p.ModelSearchWarning))
+	}
 	body = append(body, "", royalCyan.Render(fmt.Sprintf("%d of %d selected", len(selected), setup.MaxSelectedModels)), "")
 	for index, option := range wf.Draft.Catalog() {
 		pointer := "  "
@@ -100,7 +111,11 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 			checked = "[✓]"
 		}
 		label := fmt.Sprintf("%-12s  %-30s", option.Endpoint.Name, option.Ref.ModelID)
-		body = append(body, pointer+royalText.Render(checked+" "+label)+"  "+royalMuted.Render(modelMetadata(option)))
+		state := "Download"
+		if option.Installed {
+			state = "Installed"
+		}
+		body = append(body, pointer+royalText.Render(checked+" "+label)+"  "+royalMuted.Render(state+" · "+modelMetadata(option)))
 	}
 	if len(wf.Draft.Catalog()) == 0 && !p.Scanning {
 		body = append(body, royalMuted.Render("No ready models. Press m to start or load one from an installed provider."))
@@ -111,7 +126,10 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if wf.Err != nil {
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
-	footer := "↑↓ Move   •   Space Toggle   •   Enter Assign roles   •   m Manage providers   •   Esc Back"
+	footer := "/ Search   •   ↑↓ Move   •   Space Toggle   •   Enter Assign roles   •   m Manage providers   •   Esc Back"
+	if p.ModelSearchActive {
+		footer = "Type to search   •   ↑↓ Move   •   Enter Finish search   •   Esc Clear"
+	}
 	if p.Scanning {
 		footer = "Refreshing models…   •   Esc Back"
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/callumny/kingdom/internal/discovery"
 	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/memory"
+	"github.com/callumny/kingdom/internal/modelcatalog"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/skills"
@@ -46,6 +47,7 @@ type Model struct {
 	memory             memoryState
 	localModels        localModelState
 	installer          ProviderInstaller
+	modelSearch        ModelSearcher
 	providerCursor     int
 	providerConfirming bool
 	providerInstalling bool
@@ -56,6 +58,13 @@ type Model struct {
 	modelCursor        int
 	modelInventoryGen  uint64
 	modelInventoryLoad bool
+	installedModels    []setup.ModelOption
+	modelQuery         string
+	modelSearchActive  bool
+	modelSearching     bool
+	modelSearchWarning string
+	modelSearchGen     uint64
+	modelSearchCancel  context.CancelFunc
 	perfFocus          int
 	scanning           bool
 	saveGen            uint64
@@ -73,6 +82,7 @@ type Services struct {
 	Memory      MemoryBrowser
 	LocalModels LocalModelManager
 	Installer   ProviderInstaller
+	ModelSearch ModelSearcher
 }
 
 type DiscoveryMsg struct {
@@ -87,6 +97,10 @@ type SaveMsg struct {
 
 type ProviderInstaller interface {
 	InstallWithProgress(context.Context, localmodels.Kind, string, string, localmodels.ProgressReporter) error
+}
+
+type ModelSearcher interface {
+	Search(context.Context, modelcatalog.Provider, string, int) ([]modelcatalog.Model, error)
 }
 
 type providerInstallEvent struct {
@@ -108,6 +122,12 @@ type providerRuntimesMsg struct {
 type modelInventoryMsg struct {
 	generation uint64
 	runtimes   []localmodels.Runtime
+}
+
+type modelSearchMsg struct {
+	generation uint64
+	models     []modelcatalog.Model
+	warnings   []string
 }
 
 func New(c config.Config) Model {
@@ -132,6 +152,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		memory:      memoryState{store: services.Memory},
 		localModels: localModelState{manager: services.LocalModels},
 		installer:   services.Installer,
+		modelSearch: services.ModelSearch,
 		workflow:    w,
 		screen:      w.State,
 		gate:        &setup.GenerationGate{},
@@ -229,8 +250,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.modelInventoryLoad = false
-		m.workflow.Draft.ReplaceCatalog(m.installedModelOptions(x.runtimes))
+		m.installedModels = m.installedModelOptions(x.runtimes)
+		m.replaceVisibleModels(nil)
 		m.workflow.Draft.ReconcileModelSelection()
+		if count := len(m.workflow.Draft.Catalog()); count == 0 {
+			m.modelCursor = 0
+		} else if m.modelCursor >= count {
+			m.modelCursor = count - 1
+		}
+	case modelSearchMsg:
+		if m.workflow == nil || m.screen != setup.StateModels || x.generation != m.modelSearchGen {
+			return m, nil
+		}
+		m.modelSearching = false
+		m.modelSearchCancel = nil
+		m.modelSearchWarning = strings.Join(x.warnings, "; ")
+		m.replaceVisibleModels(x.models)
 		if count := len(m.workflow.Draft.Catalog()); count == 0 {
 			m.modelCursor = 0
 		} else if m.modelCursor >= count {
@@ -496,6 +531,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form, cmd = m.form.Update(msg)
 			return m, cmd
 		}
+		if m.setup && m.screen == setup.StateModels && m.modelSearchActive {
+			return m.handleModelsKey(key)
+		}
 		if m.setup && key == "q" {
 			return m, tea.Quit
 		}
@@ -748,5 +786,5 @@ func (m Model) View() tea.View {
 	if !m.setup {
 		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
 	}
-	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
+	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, ui.Presentation{ModelIndex: m.modelIndex, ModelCursor: m.modelCursor, Role: m.role, ProviderCursor: m.providerCursor, PerfFocus: m.perfFocus, Form: &m.form, PreviousEndpoints: m.config.Topology.Endpoints, FormActive: m.formActive, Scanning: m.scanning, ModelInventoryLoading: m.modelInventoryLoad, ModelQuery: m.modelQuery, ModelSearchActive: m.modelSearchActive, ModelSearching: m.modelSearching, ModelSearchWarning: m.modelSearchWarning, Saving: m.saving, ProviderConfirming: m.providerConfirming, ProviderInstalling: m.providerInstalling, ProviderNotice: m.providerNotice, ProviderProgress: m.providerProgress})
 }

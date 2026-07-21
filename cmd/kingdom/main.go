@@ -13,6 +13,7 @@ import (
 	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/memory"
 	"github.com/callumny/kingdom/internal/modelapi"
+	"github.com/callumny/kingdom/internal/modelcatalog"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/skills"
@@ -79,6 +80,7 @@ func main() {
 		Memory:      memoryStore,
 		LocalModels: localModelManager,
 		Installer:   providerInstaller,
+		ModelSearch: modelcatalog.DefaultRemote(nil),
 	}
 	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)

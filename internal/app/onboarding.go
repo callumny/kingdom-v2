@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/setup"
-	"github.com/callumny/kingdom/internal/topology"
 )
 
 func (m Model) handleProvidersKey(key string) (tea.Model, tea.Cmd) {
@@ -157,87 +156,4 @@ func (m Model) nextProviderInstallEventWithGeneration(kind localmodels.Kind, gen
 		}
 		return providerInstallEventMsg{generation: generation, kind: kind, event: event}
 	}
-}
-
-func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
-	if m.modelInventoryLoad {
-		return m, nil
-	}
-	catalog := m.workflow.Draft.Catalog()
-	switch key {
-	case "up", "k":
-		if m.modelCursor > 0 {
-			m.modelCursor--
-		}
-	case "down", "j":
-		if m.modelCursor+1 < len(catalog) {
-			m.modelCursor++
-		}
-	case " ", "space":
-		if m.modelCursor >= 0 && m.modelCursor < len(catalog) {
-			m.workflow.Err = m.workflow.Draft.ToggleModel(catalog[m.modelCursor].Ref)
-		}
-	case "enter":
-		if m.scanning {
-			return m, nil
-		}
-		if err := m.workflow.Continue(); err != nil {
-			m.workflow.Err = err
-			return m, nil
-		}
-		m.workflow.Err = nil
-		m.modelIndex = 0
-		m.screen = m.workflow.State
-	}
-	return m, nil
-}
-
-func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
-	if m.localModels.manager == nil {
-		return m, nil
-	}
-	m.modelInventoryGen++
-	generation := m.modelInventoryGen
-	m.modelInventoryLoad = true
-	m.modelCursor = 0
-	m.workflow.Err = nil
-	m.workflow.Draft.ReplaceCatalog([]setup.ModelOption{})
-	manager := m.localModels.manager
-	return m, func() tea.Msg {
-		return modelInventoryMsg{generation: generation, runtimes: manager.Inspect(context.Background())}
-	}
-}
-
-func (m Model) installedModelOptions(runtimes []localmodels.Runtime) []setup.ModelOption {
-	endpoints := make(map[string]topology.Endpoint)
-	for _, endpoint := range m.workflow.Draft.Config.Topology.Endpoints {
-		endpoints[endpoint.ID] = endpoint
-	}
-	options := make([]setup.ModelOption, 0)
-	for _, runtime := range runtimes {
-		endpointID := runtime.Endpoint.ID
-		if endpointID == "" {
-			switch runtime.Kind {
-			case localmodels.KindOllama:
-				endpointID = setup.OllamaEndpointID
-			case localmodels.KindMLX:
-				endpointID = setup.MLXEndpointID
-			}
-		}
-		if !m.workflow.Draft.ProviderEnabled(endpointID) {
-			continue
-		}
-		endpoint := runtime.Endpoint
-		if configured, exists := endpoints[endpointID]; exists {
-			endpoint = configured
-		}
-		for _, model := range runtime.Models {
-			options = append(options, setup.ModelOption{
-				Ref:       setup.ModelRef{EndpointID: endpointID, ModelID: model.ID},
-				Endpoint:  endpoint,
-				Installed: true,
-			})
-		}
-	}
-	return options
 }

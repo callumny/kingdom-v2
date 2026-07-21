@@ -58,8 +58,19 @@ func MergeAndFilter(installed, remote []Model, query string, limit int) []Model 
 		}
 		return models[i].Provider < models[j].Provider
 	})
-	if limit > 0 && len(models) > limit {
-		models = models[:limit]
+	if limit > 0 {
+		limited := make([]Model, 0, len(models))
+		remoteCount := 0
+		for _, model := range models {
+			if !model.Installed {
+				if remoteCount >= limit {
+					continue
+				}
+				remoteCount++
+			}
+			limited = append(limited, model)
+		}
+		models = limited
 	}
 	return models
 }

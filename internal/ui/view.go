@@ -17,6 +17,8 @@ type Presentation struct {
 	ProviderConfirming, ProviderInstalling                   bool
 	ProviderNotice                                           string
 	ProviderProgress                                         localmodels.InstallProgress
+	ModelQuery, ModelSearchWarning                           string
+	ModelSearchActive, ModelSearching                        bool
 }
 
 // ViewWithPresentation renders the complete presentation before applying the

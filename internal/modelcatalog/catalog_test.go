@@ -29,3 +29,26 @@ func TestMergeUsesProviderAsPartOfIdentityAndHonoursLimit(t *testing.T) {
 		t.Fatalf("models=%+v", got)
 	}
 }
+
+func TestMergeKeepsEveryInstalledMatchAndLimitsOnlyRemoteMatches(t *testing.T) {
+	installed := []Model{
+		{Provider: Ollama, ID: "qwen-installed-1", Installed: true},
+		{Provider: Ollama, ID: "qwen-installed-2", Installed: true},
+		{Provider: MLX, ID: "qwen-installed-3", Installed: true},
+	}
+	remote := []Model{
+		{Provider: Ollama, ID: "qwen-remote-1"},
+		{Provider: MLX, ID: "qwen-remote-2"},
+		{Provider: Ollama, ID: "qwen-remote-3"},
+	}
+
+	got := MergeAndFilter(installed, remote, "qwen", 2)
+	if len(got) != 5 {
+		t.Fatalf("models=%+v, want 3 installed plus 2 remote", got)
+	}
+	for index := 0; index < 3; index++ {
+		if !got[index].Installed {
+			t.Fatalf("installed model ranked after remote result: %+v", got)
+		}
+	}
+}
