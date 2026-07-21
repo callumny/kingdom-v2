@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,6 +137,78 @@ func (m *Manager) ConfigureAndStart(ctx context.Context, kind Kind, port int) er
 	return errors.New("Ollama provider is unavailable")
 }
 
+// EnsureOllamaServers starts each missing loopback Ollama endpoint and waits
+// for it to accept requests. Endpoints sharing a host and port are started
+// only once.
+func (m *Manager) EnsureOllamaServers(ctx context.Context, endpoints []topology.Endpoint) error {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	if m == nil {
+		return errors.New("local model manager is unavailable")
+	}
+	var base *ollamaProvider
+	for _, candidate := range m.providers {
+		if provider, ok := candidate.(*ollamaProvider); ok {
+			base = provider
+			break
+		}
+	}
+	if base == nil {
+		return errors.New("Ollama provider is unavailable")
+	}
+
+	waitContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	seen := make(map[string]bool, len(endpoints))
+	for _, endpoint := range endpoints {
+		host, err := validateOllamaServerEndpoint(endpoint)
+		if err != nil {
+			return fmt.Errorf("Ollama endpoint %q: %w", endpoint.ID, err)
+		}
+		if seen[host] {
+			continue
+		}
+		seen[host] = true
+		if err := waitContext.Err(); err != nil {
+			return err
+		}
+		running, _, _ := probe(waitContext, base.discoverer, endpoint)
+		if running {
+			continue
+		}
+		target := *base
+		target.endpoint = endpoint
+		if err := target.start(waitContext, ""); err != nil {
+			return fmt.Errorf("start Ollama on %s: %w", host, err)
+		}
+		if err := waitForProvider(waitContext, &target, KindOllama, ""); err != nil {
+			return fmt.Errorf("Ollama on %s: %w", host, err)
+		}
+	}
+	return nil
+}
+
+func validateOllamaServerEndpoint(endpoint topology.Endpoint) (string, error) {
+	if endpoint.Kind != topology.KindOllama {
+		return "", errors.New("must use the Ollama endpoint kind")
+	}
+	parsed, err := url.Parse(endpoint.BaseURL)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("must be an HTTP loopback URL with an explicit port")
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", errors.New("port must be 1..65535")
+	}
+	hostname := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	address := net.ParseIP(hostname)
+	if hostname != "localhost" && (address == nil || !address.IsLoopback()) {
+		return "", errors.New("must bind to localhost")
+	}
+	return parsed.Host, nil
+}
+
 func (m *Manager) StartAndWait(ctx context.Context, kind Kind, modelID string) error {
 	waitContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -150,6 +225,10 @@ func (m *Manager) StartAndWait(ctx context.Context, kind Kind, modelID string) e
 	if err := target.start(waitContext, strings.TrimSpace(modelID)); err != nil {
 		return err
 	}
+	return waitForProvider(waitContext, target, kind, modelID)
+}
+
+func waitForProvider(waitContext context.Context, target provider, kind Kind, modelID string) error {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {

@@ -22,11 +22,12 @@ type commandCall struct {
 }
 
 type fakeSystem struct {
-	paths   map[string]string
-	outputs map[string][]byte
-	errors  map[string]error
-	started []commandCall
-	run     []commandCall
+	paths     map[string]string
+	outputs   map[string][]byte
+	errors    map[string]error
+	started   []commandCall
+	run       []commandCall
+	startHook func(commandCall)
 }
 
 func (s *fakeSystem) LookPath(name string) (string, error) {
@@ -44,7 +45,11 @@ func (s *fakeSystem) Output(_ context.Context, name string, args ...string) ([]b
 }
 
 func (s *fakeSystem) Start(name string, args, env []string) error {
-	s.started = append(s.started, commandCall{name: name, args: append([]string(nil), args...), env: append([]string(nil), env...)})
+	call := commandCall{name: name, args: append([]string(nil), args...), env: append([]string(nil), env...)}
+	s.started = append(s.started, call)
+	if s.startHook != nil {
+		s.startHook(call)
+	}
 	return s.errors[name+" "+joinArgs(args)]
 }
 
@@ -128,6 +133,81 @@ func TestConfigureAndStartOllamaUsesSelectedLoopbackPort(t *testing.T) {
 	want := commandCall{name: "/tools/ollama", args: []string{"serve"}, env: []string{"OLLAMA_HOST=127.0.0.1:12001"}}
 	if len(system.started) != 1 || !reflect.DeepEqual(system.started[0], want) {
 		t.Fatalf("started=%+v want=%+v", system.started, want)
+	}
+}
+
+func TestEnsureOllamaServersStartsOnlyMissingEndpoints(t *testing.T) {
+	discoverer := &endpointReadiness{running: map[string]bool{"http://127.0.0.1:12000": true}}
+	system := &fakeSystem{paths: map[string]string{"ollama": "/tools/ollama"}}
+	system.startHook = discoverer.markStarted
+	manager := New(system, discoverer, t.TempDir())
+	endpoints := []topology.Endpoint{
+		{ID: "large", Name: "large", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:12000"},
+		{ID: "small", Name: "small", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:12001"},
+	}
+
+	if err := manager.EnsureOllamaServers(context.Background(), endpoints); err != nil {
+		t.Fatal(err)
+	}
+	want := commandCall{name: "/tools/ollama", args: []string{"serve"}, env: []string{"OLLAMA_HOST=127.0.0.1:12001"}}
+	if len(system.started) != 1 || !reflect.DeepEqual(system.started[0], want) {
+		t.Fatalf("started=%+v want=%+v", system.started, want)
+	}
+}
+
+func TestEnsureOllamaServersStartsEachUniquePortOnce(t *testing.T) {
+	discoverer := &endpointReadiness{running: make(map[string]bool)}
+	system := &fakeSystem{paths: map[string]string{"ollama": "/tools/ollama"}}
+	system.startHook = discoverer.markStarted
+	manager := New(system, discoverer, t.TempDir())
+	endpoints := []topology.Endpoint{
+		{ID: "large", Name: "large", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:12000"},
+		{ID: "small", Name: "small", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:12001"},
+		{ID: "large-again", Name: "large", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:12000"},
+	}
+
+	if err := manager.EnsureOllamaServers(context.Background(), endpoints); err != nil {
+		t.Fatal(err)
+	}
+	want := []commandCall{
+		{name: "/tools/ollama", args: []string{"serve"}, env: []string{"OLLAMA_HOST=127.0.0.1:12000"}},
+		{name: "/tools/ollama", args: []string{"serve"}, env: []string{"OLLAMA_HOST=127.0.0.1:12001"}},
+	}
+	if !reflect.DeepEqual(system.started, want) {
+		t.Fatalf("started=%+v want=%+v", system.started, want)
+	}
+}
+
+func TestEnsureOllamaServersRejectsUnsafeEndpoints(t *testing.T) {
+	manager := New(&fakeSystem{paths: map[string]string{"ollama": "/tools/ollama"}}, fakeDiscoverer{}, t.TempDir())
+	for _, endpoint := range []topology.Endpoint{
+		{ID: "remote", Kind: topology.KindOllama, BaseURL: "http://192.168.1.20:11434"},
+		{ID: "wrong-kind", Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:11434"},
+		{ID: "missing-port", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1"},
+	} {
+		if err := manager.EnsureOllamaServers(context.Background(), []topology.Endpoint{endpoint}); err == nil {
+			t.Fatalf("unsafe endpoint accepted: %+v", endpoint)
+		}
+	}
+}
+
+type endpointReadiness struct {
+	running map[string]bool
+}
+
+func (d *endpointReadiness) Discover(_ context.Context, endpoints []topology.Endpoint) ([]discovery.Result, error) {
+	result := discovery.Result{Endpoint: endpoints[0]}
+	if !d.running[endpoints[0].BaseURL] {
+		result.Err = errors.New("connection refused")
+	}
+	return []discovery.Result{result}, nil
+}
+
+func (d *endpointReadiness) markStarted(call commandCall) {
+	for _, value := range call.env {
+		if strings.HasPrefix(value, "OLLAMA_HOST=") {
+			d.running["http://"+strings.TrimPrefix(value, "OLLAMA_HOST=")] = true
+		}
 	}
 }
 
