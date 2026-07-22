@@ -27,8 +27,8 @@ tools:
 
 - inspect and preview the setup;
 - enable or disable Council;
-- assign one numbered selected model to King, Worker, or Council;
-- set Council size and Worker concurrency;
+- assign one exact selected model name to King, Worker, or Council;
+- set Council size and concurrent workers;
 - choose separate or shared Ollama servers;
 - set an enabled provider's base loopback port; and
 - apply the setup after explicit user confirmation.

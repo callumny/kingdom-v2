@@ -42,6 +42,22 @@ func TestSwapRolesExchangesAssignmentsAtomically(t *testing.T) {
 	}
 }
 
+func TestAssignModelUsesTheExactSelectedNameAcrossProviders(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	session := NewSession(draft)
+	result := session.Run(context.Background(), call("assign_model", `{"role":"council","model":"small","provider":"mlx"}`))
+	if result.Error != "" {
+		t.Fatal(result.Error)
+	}
+	want := topology.Assignment{EndpointID: setup.MLXEndpointID, Model: "small"}
+	if draft.Config.Topology.Roles.Council != want {
+		t.Fatalf("Council=%+v, want %+v", draft.Config.Topology.Roles.Council, want)
+	}
+}
+
 func TestInspectSetupNumbersSelectedModels(t *testing.T) {
 	session := NewSession(wizardDraft(t))
 	result := session.Run(context.Background(), call("inspect_setup", `{}`))
@@ -63,10 +79,10 @@ func TestSetupToolsMutateOnlyTheirOwnSetting(t *testing.T) {
 		name string
 		args string
 	}{
-		{"assign_model", `{"role":"king","model_number":1}`},
-		{"assign_model", `{"role":"worker","model_number":2}`},
+		{"assign_model", `{"role":"king","model":"large","provider":"ollama"}`},
+		{"assign_model", `{"role":"worker","model":"small","provider":"mlx"}`},
 		{"enable_council", `{"enabled":true}`},
-		{"assign_model", `{"role":"council","model_number":2}`},
+		{"assign_model", `{"role":"council","model":"small","provider":"mlx"}`},
 		{"set_council_size", `{"count":2}`},
 		{"set_worker_concurrency", `{"count":4}`},
 		{"set_ollama_server_mode", `{"mode":"separate"}`},
@@ -96,8 +112,8 @@ func TestSetupToolsRejectInvalidOrCombinedArguments(t *testing.T) {
 		name string
 		args string
 	}{
-		{"assign_model", `{"role":"king","model_number":3}`},
-		{"assign_model", `{"role":"queen","model_number":1}`},
+		{"assign_model", `{"role":"king","model":"missing"}`},
+		{"assign_model", `{"role":"queen","model":"large"}`},
 		{"set_council_size", `{"count":0}`},
 		{"set_worker_concurrency", `{"count":33}`},
 		{"set_ollama_server_mode", `{"mode":"automatic"}`},
@@ -161,10 +177,11 @@ func TestApplySetupRequiresConfirmationAndValidDraft(t *testing.T) {
 		t.Fatalf("invalid apply=%+v", result)
 	}
 	for _, item := range []struct {
-		role  string
-		model int
-	}{{"king", 1}, {"worker", 2}} {
-		arguments := fmt.Sprintf(`{"role":%q,"model_number":%d}`, item.role, item.model)
+		role     string
+		model    string
+		provider string
+	}{{"king", "large", "ollama"}, {"worker", "small", "mlx"}} {
+		arguments := fmt.Sprintf(`{"role":%q,"model":%q,"provider":%q}`, item.role, item.model, item.provider)
 		if result := session.Run(context.Background(), call("assign_model", arguments)); result.Error != "" {
 			t.Fatal(result.Error)
 		}

@@ -86,15 +86,35 @@ func TestWizardRequiresAnAssignmentToolBeforeClaimingAModelChanged(t *testing.T)
 	}
 	client := &wizardChatClient{responses: []string{
 		`{"type":"message","content":"Done.","ready":true}`,
-		`{"type":"tool","name":"assign_model","arguments":{"role":"king","model_number":2}}`,
+		`{"type":"tool","name":"assign_model","arguments":{"role":"king","model":"small","provider":"mlx"}}`,
 		`{"type":"message","content":"Done.","ready":true}`,
 	}}
 	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), "Assign model 2 to the King")
-	if err != nil || !reply.Ready || reply.Content != "Role assignments updated." {
+	if err != nil || !reply.Ready || !strings.Contains(reply.Content, "King uses MLX / small") {
 		t.Fatalf("reply=%+v err=%v", reply, err)
 	}
 	if draft.Config.Topology.Roles.King.Model != "small" || len(client.messages) != 3 {
 		t.Fatalf("assignment=%+v calls=%d", draft.Config.Topology.Roles.King, len(client.messages))
+	}
+}
+
+func TestWizardAssignsCouncilByTheModelNameTheUserTyped(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	client := &wizardChatClient{responses: []string{
+		`{"type":"message","content":"Done.","ready":true}`,
+		`{"type":"tool","name":"assign_model","arguments":{"role":"council","model":"small","provider":"mlx"}}`,
+		`{"type":"message","content":"Done.","ready":true}`,
+	}}
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), "Change the council to use small")
+	if err != nil || !reply.Ready || !strings.Contains(reply.Content, "Council uses MLX / small") {
+		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	want := topology.Assignment{EndpointID: setup.MLXEndpointID, Model: "small"}
+	if draft.Config.Topology.Roles.Council != want {
+		t.Fatalf("Council=%+v, want %+v", draft.Config.Topology.Roles.Council, want)
 	}
 }
 
@@ -105,7 +125,7 @@ func TestWizardUsesOnePurposeToolsThenExplainsUpdatedDraft(t *testing.T) {
 	}
 	client := &wizardChatClient{responses: []string{
 		`{"type":"tool","name":"enable_council","arguments":{"enabled":true}}`,
-		`{"type":"tool","name":"assign_model","arguments":{"role":"council","model_number":2}}`,
+		`{"type":"tool","name":"assign_model","arguments":{"role":"council","model":"small","provider":"mlx"}}`,
 		`{"type":"tool","name":"set_council_size","arguments":{"count":2}}`,
 		`{"type":"message","content":"Council enabled with two reviewers using model 2.","ready":true}`,
 	}}

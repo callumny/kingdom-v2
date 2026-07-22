@@ -138,7 +138,7 @@ func missingExplicitTools(request string, completed map[string]bool) []string {
 	swapRequested := strings.Contains(normalized, "swap") || (strings.Contains(normalized, "around") && containsAny(normalized, "king", "worker", "council"))
 	if swapRequested {
 		required = append(required, "swap_roles")
-	} else if containsAny(normalized, "king", "worker", "council") && strings.Contains(normalized, "model") && containsAny(normalized, "assign", "use", "change", "make", "set") {
+	} else if containsAny(normalized, "king", "worker", "council") && (containsAny(normalized, "assign", "use") || (containsAny(normalized, "change", "make", "set") && containsAny(normalized, "model", ":"))) {
 		required = append(required, "assign_model")
 	}
 	if strings.Contains(normalized, "council") && containsAny(normalized, "enable", "disable", "turn on", "turn off", "without", "remove") {

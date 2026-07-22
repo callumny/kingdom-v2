@@ -28,8 +28,8 @@ Council disabled unless three models were selected, and conservative concurrency
 change in plain language or press Enter to Apply & launch immediately, even if the conversational model
 is still starting.
 
-The Wizard can only call small setup tools: inspect or preview the draft, assign a numbered selected
-model to a role, swap two role models, enable Council, set Council size, set concurrent workers, choose
+The Wizard can only call small setup tools: inspect or preview the draft, assign an exact selected model
+to a role, swap two role models, enable Council, set Council size, set concurrent workers, choose
 shared or separate Ollama servers, set provider base ports, and apply after explicit user confirmation.
 It requests JSON output from the provider, while Kingdom reports successful changes from the resulting
 Go configuration rather than trusting model-written claims. It cannot access the shell, files, memory,

@@ -29,7 +29,7 @@ func ToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
 		{Name: "inspect_setup", Description: "List selected models by number and show current settings.", Parameters: schema(`{"type":"object","additionalProperties":false}`)},
 		{Name: "enable_council", Description: "Enable or disable the optional Council. Enabling reuses the proposed King model when no Council model is assigned.", Parameters: schema(`{"type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}`)},
-		{Name: "assign_model", Description: "Assign one numbered selected model to one role.", Parameters: schema(`{"type":"object","properties":{"role":{"enum":["king","worker","council"]},"model_number":{"type":"integer","minimum":1,"maximum":3}},"required":["role","model_number"],"additionalProperties":false}`)},
+		{Name: "assign_model", Description: "Assign a selected model to one role using its exact displayed model name and optional provider.", Parameters: schema(`{"type":"object","properties":{"role":{"enum":["king","worker","council"]},"model":{"type":"string","minLength":1},"provider":{"enum":["ollama","mlx"]}},"required":["role","model"],"additionalProperties":false}`)},
 		{Name: "swap_roles", Description: "Atomically swap the models assigned to two enabled roles.", Parameters: schema(`{"type":"object","properties":{"first":{"enum":["king","worker","council"]},"second":{"enum":["king","worker","council"]}},"required":["first","second"],"additionalProperties":false}`)},
 		{Name: "set_council_size", Description: "Set the number of Council reviewers from 1 to 9.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":9}},"required":["count"],"additionalProperties":false}`)},
 		{Name: "set_worker_concurrency", Description: "Set concurrent Workers from 1 to 32.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":32}},"required":["count"],"additionalProperties":false}`)},
@@ -125,7 +125,7 @@ func (s *Session) ChangeSummary(toolNames []string) string {
 				parts = append(parts, "Council disabled.")
 			}
 		case "assign_model":
-			parts = append(parts, "Role assignments updated.")
+			parts = append(parts, s.roleAssignmentsSummary())
 		case "swap_roles":
 			parts = append(parts, "Role models swapped.")
 		case "set_council_size":
@@ -178,11 +178,12 @@ func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 		}
 	case "assign_model":
 		var arguments struct {
-			Role        string `json:"role"`
-			ModelNumber int    `json:"model_number"`
+			Role     string `json:"role"`
+			Model    string `json:"model"`
+			Provider string `json:"provider"`
 		}
 		if err = decodeArguments(call.Arguments, &arguments); err == nil {
-			err = s.assign(arguments.Role, arguments.ModelNumber)
+			err = s.assign(arguments.Role, arguments.Model, arguments.Provider)
 		}
 	case "swap_roles":
 		var arguments struct {
@@ -297,12 +298,24 @@ func (s *Session) apply() error {
 	return nil
 }
 
-func (s *Session) assign(role string, modelNumber int) error {
+func (s *Session) assign(role, model, provider string) error {
 	selected := s.draft.SelectedModels()
-	if modelNumber < 1 || modelNumber > len(selected) {
-		return fmt.Errorf("model_number must be 1..%d", len(selected))
+	model = strings.TrimSpace(model)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	var matches []setup.ModelOption
+	for _, option := range selected {
+		if !strings.EqualFold(option.Ref.ModelID, model) || (provider != "" && !modelProviderMatches(option, provider)) {
+			continue
+		}
+		matches = append(matches, option)
 	}
-	assignment := selected[modelNumber-1].Ref.Assignment()
+	if len(matches) == 0 {
+		return fmt.Errorf("selected model %q was not found", model)
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("selected model %q exists in multiple providers; include provider", model)
+	}
+	assignment := matches[0].Ref.Assignment()
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "king":
 		s.draft.AssignKing(assignment)
@@ -314,6 +327,42 @@ func (s *Session) assign(role string, modelNumber int) error {
 		return errors.New("role must be king, worker, or council")
 	}
 	return nil
+}
+
+func modelProviderMatches(option setup.ModelOption, provider string) bool {
+	candidates := []string{option.Endpoint.Name, option.Ref.EndpointID, strings.TrimSuffix(option.Ref.EndpointID, "-local")}
+	for _, candidate := range candidates {
+		if strings.EqualFold(strings.TrimSpace(candidate), provider) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Session) assignmentLabel(assignment topology.Assignment) string {
+	if !assignment.Complete() {
+		return "disabled"
+	}
+	for _, option := range s.draft.SelectedModels() {
+		if option.Ref.Assignment() == assignment {
+			provider := option.Endpoint.Name
+			if provider == "" {
+				provider = option.Ref.EndpointID
+			}
+			return provider + " / " + option.Ref.ModelID
+		}
+	}
+	return assignment.EndpointID + " / " + assignment.Model
+}
+
+func (s *Session) roleAssignmentsSummary() string {
+	roles := s.draft.Config.Topology.Roles
+	return fmt.Sprintf(
+		"Role assignments updated: King uses %s, Worker uses %s, Council uses %s.",
+		s.assignmentLabel(roles.King),
+		s.assignmentLabel(roles.Worker),
+		s.assignmentLabel(roles.Council),
+	)
 }
 
 func (s *Session) swapRoles(first, second string) error {
