@@ -95,7 +95,7 @@ func TestModelDownloadConfirmationExplainsTheNextStep(t *testing.T) {
 	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
 
 	view := ViewWithPresentation(100, 32, true, w, Presentation{ModelDownloadConfirming: true}).Content
-	for _, want := range []string{"Download selected model?", "MLX", "What happens next", "assign roles while Kingdom tracks progress"} {
+	for _, want := range []string{"Download selected model?", "MLX", "What happens next", "tests the selected models", "opens the Wizard"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("download confirmation missing %q: %s", want, view)
 		}

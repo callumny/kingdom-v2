@@ -133,13 +133,16 @@ func TestContinuingWithOnlineModelsRequiresDownloadConfirmation(t *testing.T) {
 		t.Fatalf("download confirmation did not close: %s", m.View().Content)
 	}
 	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("y"))
-	if m.screen != setup.StateRoles {
-		t.Fatalf("confirmed selection did not advance: screen=%v", m.screen)
+	m, command := update(m, key("y"))
+	for command != nil {
+		m, command = update(m, command())
+	}
+	if m.screen != setup.StateBenchmark || len(m.workflow.Draft.PendingDownloads()) != 0 {
+		t.Fatalf("confirmed selection did not download then benchmark: screen=%v pending=%v", m.screen, m.workflow.Draft.PendingDownloads())
 	}
 }
 
-func TestConfirmedDownloadStartsInBackgroundAndContinuesToRoles(t *testing.T) {
+func TestConfirmedDownloadCompletesBeforeBenchmark(t *testing.T) {
 	downloader := &fakeModelDownloader{}
 	searcher := &fakeModelSearcher{results: map[modelcatalog.Provider][]modelcatalog.Model{
 		modelcatalog.Ollama: {{Provider: modelcatalog.Ollama, ID: "qwen3:14b"}},
@@ -161,14 +164,17 @@ func TestConfirmedDownloadStartsInBackgroundAndContinuesToRoles(t *testing.T) {
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, command := update(m, key("y"))
-	if m.screen != setup.StateRoles || command == nil || !strings.Contains(m.View().Content, "Preparing model download") {
-		t.Fatalf("download did not continue to roles: screen=%v view=%s", m.screen, m.View().Content)
+	if m.screen != setup.StateModels || command == nil || !strings.Contains(m.View().Content, "Preparing model download") {
+		t.Fatalf("download did not remain on models: screen=%v view=%s", m.screen, m.View().Content)
 	}
 	for command != nil {
 		m, command = update(m, command())
 	}
 	if len(downloader.requests) != 1 || downloader.requests[0].Model != "qwen3:14b" || len(m.workflow.Draft.PendingDownloads()) != 0 {
 		t.Fatalf("requests=%+v pending=%+v", downloader.requests, m.workflow.Draft.PendingDownloads())
+	}
+	if m.screen != setup.StateBenchmark {
+		t.Fatalf("screen=%v, want benchmark after download", m.screen)
 	}
 }
 
@@ -273,8 +279,8 @@ func TestModelsScreenSelectsAcrossProviders(t *testing.T) {
 		t.Fatalf("selected=%+v", selected)
 	}
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateRoles {
-		t.Fatalf("screen=%v, want roles", m.screen)
+	if m.screen != setup.StateBenchmark {
+		t.Fatalf("screen=%v, want benchmark", m.screen)
 	}
 }
 

@@ -184,7 +184,7 @@ func TestRescanCannotContinueWithStaleResults(t *testing.T) {
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateRoles {
+	if m.screen != setup.StateBenchmark {
 		t.Fatal("did not advance after current result")
 	}
 }
@@ -221,7 +221,12 @@ func enterRolesWithModels(t *testing.T, m Model, refs ...setup.ModelRef) Model {
 			t.Fatalf("select %+v: %v", ref, err)
 		}
 	}
-	m, _ = update(m, key("enter")) // models -> roles
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatalf("suggest roles: %v", err)
+	}
+	// The conversational Wizard replaced this legacy screen in the product flow.
+	// Keep these focused role-control tests independent of the Wizard runtime.
+	m.screen, m.workflow.State = setup.StateRoles, setup.StateRoles
 	return m
 }
 
@@ -326,8 +331,8 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateRoles || m.workflow.State != setup.StateRoles {
-		t.Fatalf("discovery enter advanced to %v/%v, want roles", m.screen, m.workflow.State)
+	if m.screen != setup.StateBenchmark || m.workflow.State != setup.StateBenchmark {
+		t.Fatalf("discovery enter advanced to %v/%v, want benchmark", m.screen, m.workflow.State)
 	}
 }
 
@@ -631,13 +636,10 @@ func TestSetupIntegrationDiscoversAssignsSavesReloads(t *testing.T) {
 	m, _ = update(m, key("down"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("1"))
-	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("down"))
-	m, _ = update(m, key("2"))
-	m, _ = update(m, key("enter"))
-	m, _ = update(m, key("n"))
-	m, _ = update(m, key("enter"))
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	m.screen, m.workflow.State = setup.StateReview, setup.StateReview
 	if m.screen != setup.StateReview {
 		t.Fatalf("screen=%v", m.screen)
 	}

@@ -45,6 +45,8 @@ type Session struct {
 	draft           *setup.Draft
 	save            func(config.Config) error
 	applyAuthorized bool
+	appliedConfig   config.Config
+	applied         bool
 }
 
 func NewSession(draft *setup.Draft) *Session { return &Session{draft: draft} }
@@ -85,6 +87,15 @@ func (s *Session) HasModel(ref setup.ModelRef) bool {
 		}
 	}
 	return false
+}
+
+func (s *Session) AppliedConfig() (config.Config, bool) {
+	if s == nil {
+		return config.Config{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appliedConfig, s.applied
 }
 
 func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
@@ -195,6 +206,8 @@ func (s *Session) apply() error {
 	if err := s.save(s.draft.Config); err != nil {
 		return fmt.Errorf("save configuration: %w", err)
 	}
+	s.appliedConfig = s.draft.Config
+	s.applied = true
 	return nil
 }
 

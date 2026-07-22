@@ -10,6 +10,7 @@ import (
 	"github.com/callumny/kingdom/internal/discovery"
 	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/memory"
+	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/modelcatalog"
 	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
@@ -17,6 +18,7 @@ import (
 	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
 	"github.com/callumny/kingdom/internal/ui"
+	"github.com/callumny/kingdom/internal/wizard"
 )
 
 type Model struct {
@@ -75,6 +77,22 @@ type Model struct {
 	modelDownloadGen        uint64
 	modelDownloadCancel     context.CancelFunc
 	perfFocus               int
+	wizardBenchmarker       wizard.Benchmarker
+	wizardClient            modelapi.ChatClient
+	wizardEngine            *wizard.Engine
+	wizardSession           *wizard.Session
+	wizardModel             setup.ModelOption
+	wizardInput             ui.ChatInput
+	wizardMessages          []string
+	wizardReady             bool
+	wizardBusy              bool
+	wizardApplying          bool
+	wizardBenchmarkActive   bool
+	wizardBenchmarkProgress wizard.BenchmarkProgress
+	wizardBenchmarkResults  []wizard.BenchmarkResult
+	wizardBenchmarkCh       <-chan wizardBenchmarkEvent
+	wizardCancel            context.CancelFunc
+	wizardGeneration        uint64
 	scanning                bool
 	saveGen                 uint64
 	saving                  bool
@@ -84,17 +102,19 @@ type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan
 type PrepareRunFunc func(context.Context, config.Config) (config.Config, error)
 
 type Services struct {
-	Defaults      []topology.Endpoint
-	Discover      DiscoverFunc
-	Save          func(config.Config) error
-	Run           RunFunc
-	PrepareRun    PrepareRunFunc
-	Skills        SkillLibrary
-	Memory        MemoryBrowser
-	LocalModels   LocalModelManager
-	Installer     ProviderInstaller
-	ModelSearch   ModelSearcher
-	ModelDownload ModelDownloader
+	Defaults        []topology.Endpoint
+	Discover        DiscoverFunc
+	Save            func(config.Config) error
+	Run             RunFunc
+	PrepareRun      PrepareRunFunc
+	Skills          SkillLibrary
+	Memory          MemoryBrowser
+	LocalModels     LocalModelManager
+	Installer       ProviderInstaller
+	ModelSearch     ModelSearcher
+	ModelDownload   ModelDownloader
+	WizardBenchmark wizard.Benchmarker
+	WizardClient    modelapi.ChatClient
 }
 
 type DiscoveryMsg struct {
@@ -170,23 +190,26 @@ func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover 
 func NewWithServices(c config.Config, services Services) Model {
 	w := setup.Start(c, services.Defaults)
 	model := Model{
-		config:          c,
-		setup:           c.RequiresSetup(),
-		defaults:        services.Defaults,
-		discover:        services.Discover,
-		save:            services.Save,
-		run:             services.Run,
-		prepareRun:      services.PrepareRun,
-		skills:          skillState{library: services.Skills},
-		memory:          memoryState{store: services.Memory},
-		localModels:     localModelState{manager: services.LocalModels},
-		installer:       services.Installer,
-		modelSearch:     services.ModelSearch,
-		modelDownloader: services.ModelDownload,
-		workflow:        w,
-		screen:          w.State,
-		gate:            &setup.GenerationGate{},
-		chat:            ui.NewChatInput(),
+		config:            c,
+		setup:             c.RequiresSetup(),
+		defaults:          services.Defaults,
+		discover:          services.Discover,
+		save:              services.Save,
+		run:               services.Run,
+		prepareRun:        services.PrepareRun,
+		skills:            skillState{library: services.Skills},
+		memory:            memoryState{store: services.Memory},
+		localModels:       localModelState{manager: services.LocalModels},
+		installer:         services.Installer,
+		modelSearch:       services.ModelSearch,
+		modelDownloader:   services.ModelDownload,
+		wizardBenchmarker: services.WizardBenchmark,
+		wizardClient:      services.WizardClient,
+		workflow:          w,
+		screen:            w.State,
+		gate:              &setup.GenerationGate{},
+		chat:              ui.NewChatInput(),
+		wizardInput:       ui.NewChatInput(),
 	}
 	if model.setup && model.screen == setup.StateProviders && services.Discover != nil {
 		model.scanning = true
@@ -227,6 +250,13 @@ func (m Model) startSetup() Model {
 	m.modelIndex, m.modelCursor, m.role, m.providerCursor, m.perfFocus = 0, 0, 0, 0, 0
 	m.form = ui.CustomEndpointForm{}
 	m.formActive, m.saving = false, false
+	if m.wizardCancel != nil {
+		m.wizardCancel()
+	}
+	m.wizardGeneration++
+	m.wizardEngine, m.wizardSession = nil, nil
+	m.wizardMessages = nil
+	m.wizardReady, m.wizardBusy, m.wizardApplying, m.wizardBenchmarkActive = false, false, false, false
 	m.scanning = m.discover != nil
 	return m
 }
@@ -321,7 +351,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modelDownloadCh = nil
 		if x.event.err != nil {
 			m.modelDownloadError = x.event.err.Error()
+			return m, nil
 		}
+		return m.advanceFromModels()
+	case wizardBenchmarkMsg:
+		if x.generation != m.wizardGeneration || m.screen != setup.StateBenchmark {
+			return m, nil
+		}
+		if x.event.progress != nil {
+			m.wizardBenchmarkProgress = *x.event.progress
+			return m, m.nextWizardBenchmarkEvent(x.generation)
+		}
+		if !x.event.done {
+			return m, m.nextWizardBenchmarkEvent(x.generation)
+		}
+		m.wizardBenchmarkActive = false
+		m.wizardCancel = nil
+		m.wizardBenchmarkResults = append([]wizard.BenchmarkResult(nil), x.event.results...)
+		return m.finishWizardBenchmark()
+	case wizardReplyMsg:
+		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
+			return m, nil
+		}
+		m.wizardBusy = false
+		if x.err != nil {
+			m.workflow.Err = x.err
+			return m, nil
+		}
+		m.workflow.Err = nil
+		m.wizardMessages = append(m.wizardMessages, "Wizard: "+x.reply.Content)
+		m.wizardReady = x.reply.Ready
+	case wizardApplyMsg:
+		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
+			return m, nil
+		}
+		m.wizardApplying = false
+		if x.err != nil {
+			m.workflow.Err = x.err
+			return m, nil
+		}
+		cfg := x.config
+		cfg.Topology.Endpoints = m.workflow.Draft.PersistenceEndpoints(m.config.Topology.Endpoints)
+		m.config = cfg
+		m.setup = false
+		m.screen = setup.StateReady
+		m.workflow.State = setup.StateReady
+		m.workflow.Err = nil
 	case providerInstallEventMsg:
 		if !m.providerInstalling || x.generation != m.providerInstallGen {
 			return m, nil
@@ -525,6 +600,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.history = append(m.history, "Cancelled")
 				m.approval = nil
 			}
+			if m.wizardCancel != nil {
+				m.wizardCancel()
+			}
 			return m, tea.Quit
 		}
 		if m.skills.open {
@@ -589,6 +667,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.setup && m.screen == setup.StateModels && (m.modelSearchActive || m.modelDownloadConfirming) {
 			return m.handleModelsKey(key)
+		}
+		if m.setup && m.screen == setup.StateWizard {
+			return m.handleWizardKey(x, key)
 		}
 		if m.setup && key == "q" {
 			return m, tea.Quit
@@ -679,7 +760,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelInventoryLoading = false
 			m.localModels.preferred = nil
 			m.scanning = false
-			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateModels || m.screen == setup.StateProviders {
+			if m.screen == setup.StateBenchmark && m.wizardCancel != nil {
+				m.wizardCancel()
+				m.wizardGeneration++
+			}
+			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateBenchmark || m.screen == setup.StateModels || m.screen == setup.StateProviders {
 				m.workflow.Back()
 				m.screen = m.workflow.State
 			}
@@ -896,5 +981,15 @@ func (m Model) presentation() ui.Presentation {
 		ProviderInstalling:      m.providerInstalling,
 		ProviderNotice:          m.providerNotice,
 		ProviderProgress:        m.providerProgress,
+		BenchmarkActive:         m.wizardBenchmarkActive,
+		BenchmarkModel:          m.wizardBenchmarkProgress.Model,
+		BenchmarkPhase:          string(m.wizardBenchmarkProgress.Phase),
+		BenchmarkResults:        wizardBenchmarkRows(m.wizardBenchmarkResults),
+		WizardModel:             wizardModelLabel(m.wizardModel, m.wizardBenchmarkResults),
+		WizardMessages:          append([]string(nil), m.wizardMessages...),
+		WizardInput:             m.wizardInput.Value(),
+		WizardBusy:              m.wizardBusy,
+		WizardReady:             m.wizardReady,
+		WizardApplying:          m.wizardApplying,
 	}
 }

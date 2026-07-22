@@ -98,7 +98,7 @@ func (m Model) advanceFromModels() (Model, tea.Cmd) {
 	m.modelIndex = 0
 	m.screen = m.workflow.State
 	m.cancelModelSearch()
-	return m, nil
+	return m.beginWizardBenchmark()
 }
 
 func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {

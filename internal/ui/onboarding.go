@@ -86,6 +86,22 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if p.ModelDownloadConfirming {
 		return modelDownloadConfirmation(wf)
 	}
+	if p.ModelDownloadActive {
+		status := p.ModelDownloadProgress.Status
+		if status == "" {
+			status = "Preparing model download"
+		}
+		body := []string{
+			royalBrand.Render("Preparing your models"),
+			"",
+			royalCyan.Render(fmt.Sprintf("%s · %d%%", status, p.ModelDownloadProgress.Percent)),
+			providerProgressBar(p.ModelDownloadProgress.Percent, 100),
+			royalMuted.Render(p.ModelDownloadProgress.Model),
+			"",
+			royalMuted.Render("Kingdom will test your selected models after every download is ready."),
+		}
+		return body, royalMuted.Render("Downloading selected models…")
+	}
 	searching := p.ModelSearchActive || p.ModelQuery != ""
 	title := "Choose your models"
 	description := "Installed Ollama and MLX models appear together. Select up to three; a mix of sizes works well for different jobs."
@@ -167,7 +183,7 @@ func modelDownloadConfirmation(wf *setup.Workflow) ([]string, string) {
 	body = append(body,
 		"",
 		royalGold.Render("What happens next"),
-		royalMuted.Render("The download starts in the background. You can assign roles while Kingdom tracks progress."),
+		royalMuted.Render("Kingdom waits for every download, then briefly tests the selected models and opens the Wizard."),
 	)
 	return body, royalMuted.Render("Enter / y Confirm and continue   •   Esc / n Back")
 }

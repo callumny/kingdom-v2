@@ -18,7 +18,6 @@ func (m Model) beginModelDownloads() (tea.Model, tea.Cmd) {
 		m.workflow.Err = fmt.Errorf("model downloader is unavailable")
 		return m, nil
 	}
-	m, _ = m.advanceFromModels()
 	m.modelDownloadGen++
 	m.modelDownloadActive = true
 	m.modelDownloadError = ""

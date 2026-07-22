@@ -36,13 +36,15 @@ func TestSetupSavesRolesAcrossOllamaAndMLX(t *testing.T) {
 	m, _ = update(m, key("down"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
 	roles := m.workflow.Draft.Config.Topology.Roles
 	if roles.King.EndpointID != "mlx-local" || roles.Worker.EndpointID != "ollama-local" {
 		t.Fatalf("cross-provider suggestions=%+v", roles)
 	}
 
-	m, _ = update(m, key("n"))
-	m, _ = update(m, key("enter"))
+	m.screen, m.workflow.State = setup.StateReview, setup.StateReview
 	m, save := update(m, key("enter"))
 	if save == nil {
 		t.Fatal("save command is nil")

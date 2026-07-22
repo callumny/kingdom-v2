@@ -42,7 +42,7 @@ func TestRolesViewExplainsJobsAndSizeGuidance(t *testing.T) {
 	}
 }
 
-func TestRolesViewKeepsDownloadProgressInContext(t *testing.T) {
+func TestModelsViewKeepsDownloadProgressInContext(t *testing.T) {
 	draft := setup.NewDraft(config.Default(), nil)
 	draft.ApplyResults([]setup.EndpointResult{{
 		Endpoint: topology.Endpoint{ID: "mlx-local", Name: "MLX"},
@@ -51,15 +51,15 @@ func TestRolesViewKeepsDownloadProgressInContext(t *testing.T) {
 	if err := draft.ToggleModel(setup.ModelRef{EndpointID: "mlx-local", ModelID: "large"}); err != nil {
 		t.Fatal(err)
 	}
-	w := &setup.Workflow{State: setup.StateRoles, Draft: draft}
+	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
 
 	view := ViewWithPresentation(100, 38, true, w, Presentation{
 		ModelDownloadActive:   true,
 		ModelDownloadProgress: localmodels.DownloadProgress{Model: "large", Status: "Downloading MLX model", Percent: 38},
 	}).Content
-	for _, want := range []string{"Downloading MLX model · 38%", "Assign roles while the model downloads", "King", "Worker", "Council (optional)"} {
+	for _, want := range []string{"Preparing your models", "Downloading MLX model · 38%", "test your selected models after every download"} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("role download view missing %q: %s", want, view)
+			t.Fatalf("model download view missing %q: %s", want, view)
 		}
 	}
 }
