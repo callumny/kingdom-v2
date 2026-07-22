@@ -64,6 +64,29 @@ func (s *Session) AuthorizeApply() {
 	s.mu.Unlock()
 }
 
+func (s *Session) PrepareDefaults() error {
+	if s == nil || s.draft == nil {
+		return errors.New("setup draft is unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.draft.ApplyRoleSuggestions()
+}
+
+func (s *Session) HasModel(ref setup.ModelRef) bool {
+	if s == nil || s.draft == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, option := range s.draft.SelectedModels() {
+		if option.Ref == ref {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 	result := tools.Result{ID: call.ID, Name: call.Name}
 	if err := ctx.Err(); err != nil {
