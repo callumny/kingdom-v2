@@ -208,6 +208,17 @@ func TestSlashWizardReopensConfiguredSetupWithoutRunningAPrompt(t *testing.T) {
 	}
 }
 
+func TestSetupCommandOpensTheWizard(t *testing.T) {
+	m := NewWithServices(completeConfig(), Services{PrepareWizard: func(_ context.Context, _ config.Config, model setup.ModelOption) (setup.ModelOption, error) {
+		return model, nil
+	}, WizardClient: &appWizardClient{}})
+	m.chat.SetValue("/setup")
+	m, command := update(m, key("ctrl+enter"))
+	if command == nil || !m.setup || m.screen != setup.StateWizard || !m.wizardReturnToReady || m.chat.Value() != "" {
+		t.Fatalf("/setup did not open Wizard: setup=%v screen=%v return=%v input=%q command=%v", m.setup, m.screen, m.wizardReturnToReady, m.chat.Value(), command)
+	}
+}
+
 func TestWizardTabOpensManualSetupAndEscapeReturns(t *testing.T) {
 	m := wizardAppModel(nil, &appWizardClient{}, nil)
 	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {

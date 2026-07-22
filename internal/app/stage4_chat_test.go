@@ -12,8 +12,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
+	"github.com/callumny/kingdom/internal/discovery"
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/orchestration"
+	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/topology"
 )
@@ -149,6 +152,51 @@ func TestControlSReopensSetupWhenIdle(t *testing.T) {
 	m, _ := update(New(completeConfig()), key("ctrl+s"))
 	if !m.setup {
 		t.Fatal("setup not reopened")
+	}
+}
+
+func TestReadySlashCommandsOpenSetupMemoryAndSkills(t *testing.T) {
+	library := &fakeSkillLibrary{skills: []skills.Skill{{Name: "careful-coder"}}}
+	store := &fakeMemoryBrowser{}
+
+	m := NewWithServices(completeConfig(), Services{Skills: library, Memory: store})
+	m.chat.SetValue("/memory")
+	m, command := update(m, key("ctrl+enter"))
+	if !m.memory.open || command == nil || m.chat.Value() != "" {
+		t.Fatalf("/memory did not open browser: open=%v command=%v input=%q", m.memory.open, command, m.chat.Value())
+	}
+
+	m = NewWithServices(completeConfig(), Services{Skills: library, Memory: store})
+	m.chat.SetValue("/skills")
+	m, command = update(m, key("ctrl+enter"))
+	if !m.skills.open || command != nil || library.loads == 0 || m.chat.Value() != "" {
+		t.Fatalf("/skills did not open browser: open=%v command=%v loads=%d input=%q", m.skills.open, command, library.loads, m.chat.Value())
+	}
+}
+
+func TestModelsCommandOpensPageTwoAndEscapeReturnsToChat(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers.Ollama.Enabled = true
+	cfg.Topology.Endpoints = []topology.Endpoint{{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://localhost:11434"}}
+	cfg.Topology.Roles.King = topology.Assignment{EndpointID: setup.OllamaEndpointID, Model: "qwen3:8b"}
+	cfg.Topology.Roles.Worker = cfg.Topology.Roles.King
+	cfg.CouncilEnabled = false
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "qwen3:8b"}}, Endpoint: cfg.Topology.Endpoints[0],
+	}}}
+	m := NewWithServices(cfg, Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager})
+	m.chat.SetValue("/models")
+	m, command := update(m, key("ctrl+enter"))
+	if !m.setup || m.screen != setup.StateModels || command == nil || m.chat.Value() != "" {
+		t.Fatalf("/models did not open page two: setup=%v screen=%v command=%v input=%q", m.setup, m.screen, command, m.chat.Value())
+	}
+	m, _ = update(m, command())
+	if !strings.Contains(m.View().Content, "qwen3:8b") {
+		t.Fatalf("models inventory not loaded: %s", m.View().Content)
+	}
+	m, _ = update(m, key("esc"))
+	if m.setup || m.screen != setup.StateReady {
+		t.Fatalf("models Esc did not return to chat: setup=%v screen=%v", m.setup, m.screen)
 	}
 }
 func TestNilRunOrNilStreamFailsCleanly(t *testing.T) {

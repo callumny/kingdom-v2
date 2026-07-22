@@ -56,11 +56,33 @@ func TestChatInputRuneLimitPreservesUTF8(t *testing.T) {
 func TestChatViewRendersHistoryProgressErrorAndControls(t *testing.T) {
 	c := NewChatInput()
 	v := ChatView(120, 30, []string{"You: hello", "King: world"}, "Workers running…", "boom", c, true).Content
-	for _, want := range []string{"You: hello", "King: world", "Workers running…", "Error: boom", "Running…", "Ctrl+Enter send", "Ctrl+C quit"} {
+	for _, want := range []string{"You: hello", "King: world", "Workers running…", "Error: boom", "Ctrl+Enter Send", "Ctrl+C Quit"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("view missing %q: %s", want, v)
 		}
 	}
+}
+
+func TestChatViewUsesFocusedCommandsAndModelActivitySidebar(t *testing.T) {
+	view := ChatViewWithPresentation(120, 34, ChatPresentation{
+		History: []string{"You: hello", "King: Welcome to the Kingdom."},
+		Input:   NewChatInput(),
+		Models: []ChatModelActivity{
+			{Provider: "MLX", Model: "Ornith-1.0-9B-6bit", Roles: "King, Council"},
+			{Provider: "Ollama", Model: "llama3.1:8b", Roles: "Workers"},
+		},
+	}).Content
+	for _, want := range []string{"♛ KINGDOM", "Conversation", "Model activity", "Ornith-1.0-9B-6bit", "King, Council", "llama3.1:8b", "Workers", "— tok/s", "/setup Setup", "/models Models", "/memory Memory", "/skills Skills"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("main view missing %q: %s", want, view)
+		}
+	}
+	for _, legacy := range []string{"Ctrl+R models", "Ctrl+K skills", "Ctrl+M memory", "Ctrl+S setup"} {
+		if strings.Contains(view, legacy) {
+			t.Fatalf("main view retained legacy command %q: %s", legacy, view)
+		}
+	}
+	assertViewFits(t, view, 120, 34)
 }
 
 func TestChatViewClipsTinyTerminal(t *testing.T) {

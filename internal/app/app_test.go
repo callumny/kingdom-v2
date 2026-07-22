@@ -37,7 +37,7 @@ func TestViewReflectsSetupState(t *testing.T) {
 	}
 
 	c := completeConfig()
-	if got := New(c).View().Content; !strings.Contains(got, "Ctrl+Enter send") {
+	if got := New(c).View().Content; !strings.Contains(got, "Ctrl+Enter Send") || !strings.Contains(got, "/models Models") {
 		t.Fatalf("complete config view = %q, want chat controls", got)
 	}
 }

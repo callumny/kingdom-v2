@@ -89,6 +89,7 @@ type Model struct {
 	modelRemoveNotice       string
 	modelRemoveGen          uint64
 	modelRemoveCancel       context.CancelFunc
+	modelsReturnToReady     bool
 	perfFocus               int
 	prepareWizard           WizardPrepareFunc
 	wizardClient            modelapi.ChatClient
@@ -293,6 +294,7 @@ func (m Model) startSetup() Model {
 	m.modelRemoveConfirming, m.modelRemoveActive = false, false
 	m.modelRemoveTarget = setup.ModelOption{}
 	m.modelRemoveNotice = ""
+	m.modelsReturnToReady = false
 	m.scanning = m.discover != nil
 	return m
 }
@@ -787,9 +789,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if p == "" {
 					return m, nil
 				}
-				if p == "/wizard" {
+				switch strings.ToLower(p) {
+				case "/setup", "/wizard":
 					m.chat.SetValue("")
 					return m.reopenWizard()
+				case "/models":
+					m.chat.SetValue("")
+					return m.reopenModels()
+				case "/memory":
+					m.chat.SetValue("")
+					if m.memory.store == nil {
+						m.chatError = "memory is unavailable"
+						return m, nil
+					}
+					return m, m.openMemory()
+				case "/skills":
+					m.chat.SetValue("")
+					if m.skills.library == nil {
+						m.chatError = "skills are unavailable"
+						return m, nil
+					}
+					m.openSkills()
+					return m, nil
 				}
 				m.history = append(m.history, "You: "+p)
 				m.chat.SetValue("")
@@ -837,6 +858,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelInventoryLoading = false
 			m.localModels.preferred = nil
 			m.scanning = false
+			if m.screen == setup.StateModels && m.modelsReturnToReady {
+				m.cancelModelSearch()
+				m.modelsReturnToReady = false
+				m.setup = false
+				m.screen = setup.StateReady
+				m.workflow.State = setup.StateReady
+				return m, nil
+			}
 			if m.screen == setup.StateRoles && m.wizardManual {
 				return m.returnToWizardFromManual()
 			}
@@ -1034,7 +1063,14 @@ func (m Model) View() tea.View {
 		return m.skillsView()
 	}
 	if !m.setup {
-		return ui.ChatView(m.width, m.height, m.history, m.progress, m.chatError, m.chat, m.running)
+		return ui.ChatViewWithPresentation(m.width, m.height, ui.ChatPresentation{
+			History:  m.history,
+			Progress: m.progress,
+			Error:    m.chatError,
+			Input:    m.chat,
+			Running:  m.running,
+			Models:   m.chatModelActivity(),
+		})
 	}
 	return ui.ViewWithPresentation(m.width, m.height, m.setup, m.workflow, m.presentation())
 }

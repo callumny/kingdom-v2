@@ -127,7 +127,17 @@ func (m Model) advanceFromModels() (Model, tea.Cmd) {
 	m.modelIndex = 0
 	m.screen = m.workflow.State
 	m.cancelModelSearch()
-	return m.beginImmediateWizard(false)
+	return m.beginImmediateWizard(m.modelsReturnToReady)
+}
+
+func (m Model) reopenModels() (Model, tea.Cmd) {
+	m.workflow = &setup.Workflow{State: setup.StateModels, Draft: setup.NewDraft(m.config, m.defaults), Previous: m.config}
+	m.setup = true
+	m.screen = setup.StateModels
+	m.modelsReturnToReady = true
+	m.chatError = ""
+	next, command := m.beginModelInventory()
+	return next.(Model), command
 }
 
 func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
