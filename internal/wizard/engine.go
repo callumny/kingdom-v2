@@ -66,6 +66,7 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 	malformed := 0
 	corrections := 0
 	completedTools := make(map[string]bool)
+	completedOrder := make([]string, 0, 4)
 	for toolCalls := 0; toolCalls < maxWizardToolCalls; {
 		if err := ctx.Err(); err != nil {
 			return Reply{}, err
@@ -79,7 +80,7 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 			e.history = append(e.history, modelapi.Message{Role: "assistant", Content: raw})
 			malformed++
 			if malformed > 1 {
-				reply := deterministicRecommendation()
+				reply := e.fallbackReply()
 				e.history = append(e.history, modelapi.Message{Role: "assistant", Content: reply.Content})
 				return reply, nil
 			}
@@ -98,11 +99,17 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 				e.history = append(e.history, modelapi.Message{Role: "user", Content: "That summary is premature. The original request explicitly requires these successful tools: " + strings.Join(missing, ", ") + ". Continue with those changes before summarizing."})
 				continue
 			}
+			if len(completedOrder) > 0 {
+				return Reply{Content: e.session.ChangeSummary(completedOrder), Ready: e.session.Ready()}, nil
+			}
 			return Reply{Content: action.Content, Ready: action.Ready}, nil
 		case "tool":
 			toolCalls++
 			result := e.session.Run(ctx, tools.Call{ID: fmt.Sprintf("wizard-%d", toolCalls), Name: action.Name, Arguments: action.Arguments})
 			if result.Error == "" {
+				if !completedTools[action.Name] {
+					completedOrder = append(completedOrder, action.Name)
+				}
 				completedTools[action.Name] = true
 			}
 			encoded, _ := json.Marshal(result)
@@ -229,10 +236,10 @@ func parseAction(raw string) (action, error) {
 	return parsed, nil
 }
 
-func deterministicRecommendation() Reply {
+func (e *Engine) fallbackReply() Reply {
 	return Reply{
-		Content:  "I prepared a sensible setup using the larger selected model for King, the smaller model for Worker, and conservative performance defaults. You can apply it now or ask for one specific change.",
-		Ready:    true,
+		Content:  "I couldn't reliably interpret the local model's response, so I stopped rather than claim a change. The Proposed Kingdom below is the source of truth; retry or use Tab for Manual setup.",
+		Ready:    e.session.Ready(),
 		Fallback: true,
 	}
 }

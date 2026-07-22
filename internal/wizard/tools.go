@@ -99,6 +99,52 @@ func (s *Session) AppliedConfig() (config.Config, bool) {
 	return s.appliedConfig, s.applied
 }
 
+func (s *Session) Ready() bool {
+	if s == nil || s.draft == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return validateDraft(s.draft) == nil
+}
+
+func (s *Session) ChangeSummary(toolNames []string) string {
+	if s == nil || s.draft == nil {
+		return "Setup updated."
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	parts := make([]string, 0, len(toolNames))
+	for _, name := range toolNames {
+		switch name {
+		case "enable_council":
+			if s.draft.Config.CouncilEnabled {
+				parts = append(parts, "Council enabled.")
+			} else {
+				parts = append(parts, "Council disabled.")
+			}
+		case "assign_model":
+			parts = append(parts, "Role assignments updated.")
+		case "set_council_size":
+			parts = append(parts, fmt.Sprintf("Council members set to %d.", s.draft.Config.CouncilSize))
+		case "set_worker_concurrency":
+			parts = append(parts, fmt.Sprintf("Concurrent workers set to %d.", s.draft.Config.WorkerConcurrency))
+		case "set_ollama_server_mode":
+			mode := "shared"
+			if s.draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
+				mode = "separate"
+			}
+			parts = append(parts, "Ollama servers set to "+mode+".")
+		case "set_provider_port":
+			parts = append(parts, "Provider port updated.")
+		}
+	}
+	if len(parts) == 0 {
+		return "Setup updated."
+	}
+	return strings.Join(parts, " ")
+}
+
 func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 	result := tools.Result{ID: call.ID, Name: call.Name}
 	if err := ctx.Err(); err != nil {

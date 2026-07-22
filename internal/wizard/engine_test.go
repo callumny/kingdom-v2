@@ -51,7 +51,7 @@ func TestWizardUsesOnePurposeToolsThenExplainsUpdatedDraft(t *testing.T) {
 	}}
 	engine := NewEngine(client, draft.SelectedModels()[1], NewSession(draft))
 	reply, err := engine.Respond(context.Background(), "Please add a small council")
-	if err != nil || !reply.Ready || !strings.Contains(reply.Content, "two reviewers") {
+	if err != nil || !reply.Ready || !strings.Contains(reply.Content, "Council members set to 2") {
 		t.Fatalf("reply=%+v err=%v", reply, err)
 	}
 	if !draft.Config.CouncilEnabled || draft.Config.CouncilSize != 2 || draft.Config.Topology.Roles.Council.Model != "small" {
@@ -141,11 +141,33 @@ func TestWizardRepairsMalformedControlResponseThenFallsBack(t *testing.T) {
 	client := &wizardChatClient{responses: []string{"not json", "still not json"}}
 	engine := NewEngine(client, draft.SelectedModels()[0], NewSession(draft))
 	reply, err := engine.Start(context.Background())
-	if err != nil || !reply.Ready || !reply.Fallback || !strings.Contains(reply.Content, "prepared") {
+	if err != nil || !reply.Ready || !reply.Fallback || !strings.Contains(reply.Content, "couldn't reliably interpret") || !strings.Contains(reply.Content, "Manual setup") {
 		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	if strings.Contains(reply.Content, "I prepared a sensible setup") {
+		t.Fatalf("fallback made a misleading success claim: %+v", reply)
 	}
 	if len(client.messages) != 2 || !strings.Contains(client.messages[1][len(client.messages[1])-1].Content, "valid JSON") {
 		t.Fatalf("repair messages=%+v", client.messages)
+	}
+}
+
+func TestWizardReportsTheDraftInsteadOfRepeatingModelSuccessClaims(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	client := &wizardChatClient{responses: []string{
+		`{"type":"tool","name":"set_worker_concurrency","arguments":{"count":5}}`,
+		`{"type":"message","content":"All changes have been successfully applied.","ready":true}`,
+	}}
+
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), "Increase concurrent workers to 5")
+	if err != nil || !reply.Ready {
+		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	if reply.Content != "Concurrent workers set to 5." {
+		t.Fatalf("reply=%q, want state-derived confirmation", reply.Content)
 	}
 }
 

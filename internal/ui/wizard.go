@@ -39,7 +39,7 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 	} else {
 		body = append(body, "Council:    "+royalMuted.Render("disabled"))
 	}
-	body = append(body, fmt.Sprintf("Concurrency: %d Workers", wf.Draft.Config.WorkerConcurrency))
+	body = append(body, fmt.Sprintf("Concurrent workers: %d", wf.Draft.Config.WorkerConcurrency))
 	if hasManagedOllamaSelection(wf) {
 		mode := "shared server"
 		if wf.Draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
@@ -56,9 +56,9 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 	} else {
 		body = append(body, royalText.Render("Ask: "+p.WizardInput+"▏"))
 	}
-	footer := "Type a question or change   •   Ctrl+Enter Send   •   Esc Back"
+	footer := "Type a question or change   •   Ctrl+Enter Send   •   Tab Manual setup   •   Esc Back"
 	if p.WizardReady {
-		footer = "Ctrl+Enter Send   •   Enter Apply & launch   •   Esc Back"
+		footer = "Ctrl+Enter Send   •   Enter Apply & launch   •   Tab Manual setup   •   Esc Back"
 	}
 	if p.WizardApplying {
 		footer = "Validating and saving setup…"
