@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -94,32 +93,16 @@ func TestModelRowsUseAlignedProviderStatusAndNameColumns(t *testing.T) {
 	}
 }
 
-func TestBenchmarkAndWizardViewsMatchConciseJourney(t *testing.T) {
+func TestWizardViewMatchesConciseJourney(t *testing.T) {
 	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
-	w.State = setup.StateBenchmark
-	w.Err = errors.New("selected model could not be tested")
-	benchmark := ViewWithPresentation(100, 40, true, w, Presentation{
-		BenchmarkActive: true,
-		BenchmarkModel:  "small",
-		BenchmarkPhase:  "Testing tool response",
-		BenchmarkResults: []WizardBenchmarkRow{
-			{Provider: "Ollama", Model: "large", Status: "24.0 tok/s · reliable"},
-		},
-	}).Content
-	for _, want := range []string{"Finding your Setup Wizard", "fastest reliable", "large", "24.0 tok/s", "small", "Testing tool response", "selected model could not be tested", "Esc to change"} {
-		if !strings.Contains(benchmark, want) {
-			t.Fatalf("benchmark missing %q: %s", want, benchmark)
-		}
-	}
-
 	w.State = setup.StateWizard
-	w.Err = nil
 	wizardView := ViewWithPresentation(100, 40, true, w, Presentation{
-		WizardModel:    "small · 71.0 tok/s",
-		WizardMessages: []string{"Wizard: I prepared a sensible setup."},
-		WizardReady:    true,
+		WizardModel:     "small · fast setup model",
+		WizardMessages:  []string{"Wizard: I prepared a sensible setup."},
+		WizardReady:     true,
+		WizardPreparing: true,
 	}).Content
-	for _, want := range []string{"Wizard", "small · 71.0 tok/s", "I prepared a sensible setup", "King", "Worker", "Council", "Apply & launch", "Ctrl+Enter Send"} {
+	for _, want := range []string{"Wizard", "small · fast setup model", "Starting the local Wizard model", "I prepared a sensible setup", "King", "Worker", "Council", "Apply & launch", "Ctrl+Enter Send"} {
 		if !strings.Contains(wizardView, want) {
 			t.Fatalf("Wizard missing %q: %s", want, wizardView)
 		}

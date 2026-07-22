@@ -26,12 +26,12 @@ func TestOnboardingStartsAtWelcomeThenProviders(t *testing.T) {
 	if err := w.Draft.ToggleModel(ModelRef{EndpointID: discovery.DefaultEndpoints()[0].ID, ModelID: "model"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Continue(); err != nil || w.State != StateBenchmark {
+	if err := w.Continue(); err != nil || w.State != StateWizard {
 		t.Fatalf("models continue: state=%v err=%v", w.State, err)
 	}
 	w.Back()
 	if w.State != StateModels {
-		t.Fatalf("benchmark back=%v, want models", w.State)
+		t.Fatalf("Wizard back=%v, want models", w.State)
 	}
 	w.Back()
 	if w.State != StateProviders {

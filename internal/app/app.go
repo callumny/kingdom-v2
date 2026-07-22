@@ -77,7 +77,7 @@ type Model struct {
 	modelDownloadGen        uint64
 	modelDownloadCancel     context.CancelFunc
 	perfFocus               int
-	wizardBenchmarker       wizard.Benchmarker
+	prepareWizard           WizardPrepareFunc
 	wizardClient            modelapi.ChatClient
 	wizardEngine            *wizard.Engine
 	wizardSession           *wizard.Session
@@ -87,10 +87,8 @@ type Model struct {
 	wizardReady             bool
 	wizardBusy              bool
 	wizardApplying          bool
-	wizardBenchmarkActive   bool
-	wizardBenchmarkProgress wizard.BenchmarkProgress
-	wizardBenchmarkResults  []wizard.BenchmarkResult
-	wizardBenchmarkCh       <-chan wizardBenchmarkEvent
+	wizardPreparing         bool
+	wizardReturnToReady     bool
 	wizardCancel            context.CancelFunc
 	wizardGeneration        uint64
 	scanning                bool
@@ -100,21 +98,22 @@ type Model struct {
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
 type PrepareRunFunc func(context.Context, config.Config) (config.Config, error)
+type WizardPrepareFunc func(context.Context, config.Config, setup.ModelOption) (setup.ModelOption, error)
 
 type Services struct {
-	Defaults        []topology.Endpoint
-	Discover        DiscoverFunc
-	Save            func(config.Config) error
-	Run             RunFunc
-	PrepareRun      PrepareRunFunc
-	Skills          SkillLibrary
-	Memory          MemoryBrowser
-	LocalModels     LocalModelManager
-	Installer       ProviderInstaller
-	ModelSearch     ModelSearcher
-	ModelDownload   ModelDownloader
-	WizardBenchmark wizard.Benchmarker
-	WizardClient    modelapi.ChatClient
+	Defaults      []topology.Endpoint
+	Discover      DiscoverFunc
+	Save          func(config.Config) error
+	Run           RunFunc
+	PrepareRun    PrepareRunFunc
+	Skills        SkillLibrary
+	Memory        MemoryBrowser
+	LocalModels   LocalModelManager
+	Installer     ProviderInstaller
+	ModelSearch   ModelSearcher
+	ModelDownload ModelDownloader
+	PrepareWizard WizardPrepareFunc
+	WizardClient  modelapi.ChatClient
 }
 
 type DiscoveryMsg struct {
@@ -190,26 +189,26 @@ func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover 
 func NewWithServices(c config.Config, services Services) Model {
 	w := setup.Start(c, services.Defaults)
 	model := Model{
-		config:            c,
-		setup:             c.RequiresSetup(),
-		defaults:          services.Defaults,
-		discover:          services.Discover,
-		save:              services.Save,
-		run:               services.Run,
-		prepareRun:        services.PrepareRun,
-		skills:            skillState{library: services.Skills},
-		memory:            memoryState{store: services.Memory},
-		localModels:       localModelState{manager: services.LocalModels},
-		installer:         services.Installer,
-		modelSearch:       services.ModelSearch,
-		modelDownloader:   services.ModelDownload,
-		wizardBenchmarker: services.WizardBenchmark,
-		wizardClient:      services.WizardClient,
-		workflow:          w,
-		screen:            w.State,
-		gate:              &setup.GenerationGate{},
-		chat:              ui.NewChatInput(),
-		wizardInput:       ui.NewChatInput(),
+		config:          c,
+		setup:           c.RequiresSetup(),
+		defaults:        services.Defaults,
+		discover:        services.Discover,
+		save:            services.Save,
+		run:             services.Run,
+		prepareRun:      services.PrepareRun,
+		skills:          skillState{library: services.Skills},
+		memory:          memoryState{store: services.Memory},
+		localModels:     localModelState{manager: services.LocalModels},
+		installer:       services.Installer,
+		modelSearch:     services.ModelSearch,
+		modelDownloader: services.ModelDownload,
+		prepareWizard:   services.PrepareWizard,
+		wizardClient:    services.WizardClient,
+		workflow:        w,
+		screen:          w.State,
+		gate:            &setup.GenerationGate{},
+		chat:            ui.NewChatInput(),
+		wizardInput:     ui.NewChatInput(),
 	}
 	if model.setup && model.screen == setup.StateProviders && services.Discover != nil {
 		model.scanning = true
@@ -256,7 +255,8 @@ func (m Model) startSetup() Model {
 	m.wizardGeneration++
 	m.wizardEngine, m.wizardSession = nil, nil
 	m.wizardMessages = nil
-	m.wizardReady, m.wizardBusy, m.wizardApplying, m.wizardBenchmarkActive = false, false, false, false
+	m.wizardReady, m.wizardBusy, m.wizardApplying, m.wizardPreparing = false, false, false, false
+	m.wizardReturnToReady = false
 	m.scanning = m.discover != nil
 	return m
 }
@@ -354,21 +354,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.advanceFromModels()
-	case wizardBenchmarkMsg:
-		if x.generation != m.wizardGeneration || m.screen != setup.StateBenchmark {
+	case wizardPreparedMsg:
+		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
 			return m, nil
 		}
-		if x.event.progress != nil {
-			m.wizardBenchmarkProgress = *x.event.progress
-			return m, m.nextWizardBenchmarkEvent(x.generation)
-		}
-		if !x.event.done {
-			return m, m.nextWizardBenchmarkEvent(x.generation)
-		}
-		m.wizardBenchmarkActive = false
+		m.wizardPreparing = false
 		m.wizardCancel = nil
-		m.wizardBenchmarkResults = append([]wizard.BenchmarkResult(nil), x.event.results...)
-		return m.finishWizardBenchmark()
+		if x.err != nil {
+			m.workflow.Err = fmt.Errorf("Wizard conversation is unavailable: %w. You can still apply the proposed defaults", x.err)
+			return m, nil
+		}
+		m.wizardModel = x.model
+		m.wizardEngine = wizard.NewEngine(m.wizardClient, m.wizardModel, m.wizardSession)
+		m.workflow.Err = nil
 	case wizardReplyMsg:
 		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
 			return m, nil
@@ -392,6 +390,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cfg := x.config
 		cfg.Topology.Endpoints = m.workflow.Draft.PersistenceEndpoints(m.config.Topology.Endpoints)
+		if m.wizardCancel != nil {
+			m.wizardCancel()
+			m.wizardCancel = nil
+		}
+		m.wizardGeneration++
+		m.wizardPreparing = false
 		m.config = cfg
 		m.setup = false
 		m.screen = setup.StateReady
@@ -715,6 +719,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if p == "" {
 					return m, nil
 				}
+				if p == "/wizard" {
+					m.chat.SetValue("")
+					return m.reopenWizard()
+				}
 				m.history = append(m.history, "You: "+p)
 				m.chat.SetValue("")
 				m.chatError = ""
@@ -760,11 +768,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelInventoryLoading = false
 			m.localModels.preferred = nil
 			m.scanning = false
-			if m.screen == setup.StateBenchmark && m.wizardCancel != nil {
-				m.wizardCancel()
-				m.wizardGeneration++
-			}
-			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateBenchmark || m.screen == setup.StateModels || m.screen == setup.StateProviders {
+			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateModels || m.screen == setup.StateProviders {
 				m.workflow.Back()
 				m.screen = m.workflow.State
 			}
@@ -981,15 +985,12 @@ func (m Model) presentation() ui.Presentation {
 		ProviderInstalling:      m.providerInstalling,
 		ProviderNotice:          m.providerNotice,
 		ProviderProgress:        m.providerProgress,
-		BenchmarkActive:         m.wizardBenchmarkActive,
-		BenchmarkModel:          m.wizardBenchmarkProgress.Model,
-		BenchmarkPhase:          string(m.wizardBenchmarkProgress.Phase),
-		BenchmarkResults:        wizardBenchmarkRows(m.wizardBenchmarkResults),
-		WizardModel:             wizardModelLabel(m.wizardModel, m.wizardBenchmarkResults),
+		WizardModel:             wizardModelLabel(m.wizardModel),
 		WizardMessages:          append([]string(nil), m.wizardMessages...),
 		WizardInput:             m.wizardInput.Value(),
 		WizardBusy:              m.wizardBusy,
 		WizardReady:             m.wizardReady,
 		WizardApplying:          m.wizardApplying,
+		WizardPreparing:         m.wizardPreparing,
 	}
 }

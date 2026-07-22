@@ -8,38 +8,6 @@ import (
 	"github.com/callumny/kingdom/internal/setup"
 )
 
-type WizardBenchmarkRow struct {
-	Provider string
-	Model    string
-	Status   string
-}
-
-func benchmarkSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
-	body := []string{
-		royalBrand.Render("Finding your Setup Wizard"),
-		"",
-		royalText.Render("Kingdom is briefly testing your selected models."),
-		royalMuted.Render("The fastest reliable model will help finish setup."),
-		"",
-		"        " + royalMuted.Render(fmt.Sprintf("%-10s %-32s %s", "Provider", "Model", "Result")),
-	}
-	for _, result := range p.BenchmarkResults {
-		body = append(body, "        "+royalCyan.Render(fmt.Sprintf("%-10s", result.Provider))+" "+royalText.Render(fmt.Sprintf("%-32s", result.Model))+" "+royalGreen.Render(result.Status))
-	}
-	if p.BenchmarkActive {
-		body = append(body,
-			"",
-			royalGold.Render("Testing "+p.BenchmarkModel),
-			royalCyan.Render(p.BenchmarkPhase+"…"),
-			royalMuted.Render("One warm-up and one short timed response. Results stay in this setup session."),
-		)
-	}
-	if wf.Err != nil {
-		body = append(body, "", royalRed.Render(wf.Err.Error()), royalMuted.Render("Press Esc to change your model selection."))
-	}
-	return body, royalMuted.Render("Benchmarking selected models…   •   Esc Cancel and return")
-}
-
 func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	body := []string{
 		royalBrand.Render("Wizard"),
@@ -49,6 +17,9 @@ func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		body = append(body, royalBadge.Render(p.WizardModel))
 	}
 	body = append(body, "")
+	if p.WizardPreparing {
+		body = append(body, royalMuted.Render("Starting the local Wizard model in the background…"), "")
+	}
 	start := max(0, len(p.WizardMessages)-4)
 	for _, message := range p.WizardMessages[start:] {
 		if strings.HasPrefix(message, "You: ") {
@@ -91,6 +62,9 @@ func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	}
 	if p.WizardApplying {
 		footer = "Validating and saving setup…"
+	}
+	if wf.Err != nil {
+		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
 	return body, royalMuted.Render(footer)
 }

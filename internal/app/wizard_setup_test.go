@@ -3,96 +3,75 @@ package app
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/modelapi"
+	"github.com/callumny/kingdom/internal/orchestration"
 	"github.com/callumny/kingdom/internal/setup"
+	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/topology"
 	"github.com/callumny/kingdom/internal/wizard"
 )
 
-type appCompletionClient struct {
-	responses []modelapi.Completion
-}
-
-func (f *appCompletionClient) Complete(context.Context, topology.Endpoint, string, []modelapi.Message, int) (modelapi.Completion, error) {
-	response := f.responses[0]
-	f.responses = f.responses[1:]
-	return response, nil
-}
-
 type appWizardClient struct {
 	responses []string
+	calls     int
 }
 
 func (f *appWizardClient) Chat(context.Context, topology.Endpoint, string, []modelapi.Message) (string, error) {
+	f.calls++
 	response := f.responses[0]
 	f.responses = f.responses[1:]
 	return response, nil
 }
 
-func TestModelsAdvanceThroughBenchmarkIntoWizard(t *testing.T) {
-	completion := &appCompletionClient{responses: []modelapi.Completion{
-		{Content: "ready"},
-		{Content: `{"tool":{"name":"inspect_setup","arguments":{}}}`, CompletionTokens: 20, GenerationDuration: time.Second},
-		{Content: "ready"},
-		{Content: `{"tool":{"name":"inspect_setup","arguments":{}}}`, CompletionTokens: 40, GenerationDuration: time.Second},
-	}}
-	chat := &appWizardClient{responses: []string{`{"type":"message","content":"I prepared your setup.","ready":true}`}}
-	m := wizardAppModel(wizard.Benchmarker{Client: completion, TimeoutPerModel: time.Second}, chat, nil)
+func TestModelsOpenWizardImmediatelyWithTheSmallestSelectedModel(t *testing.T) {
+	chat := &appWizardClient{}
+	var prepared setup.ModelOption
+	m := wizardAppModel(func(_ context.Context, _ config.Config, model setup.ModelOption) (setup.ModelOption, error) {
+		prepared = model
+		model.Endpoint.BaseURL = "http://127.0.0.1:18083"
+		return model, nil
+	}, chat, nil)
 	m.screen, m.workflow.State = setup.StateModels, setup.StateModels
 
-	var cmd any
 	m, command := m.advanceFromModels()
-	if command == nil || m.screen != setup.StateBenchmark {
-		t.Fatalf("benchmark did not start: screen=%v cmd=%v", m.screen, command)
+	if command == nil || m.screen != setup.StateWizard || !m.wizardReady || m.wizardModel.Ref.ModelID != "small" {
+		t.Fatalf("Wizard did not open immediately: screen=%v model=%+v ready=%v command=%v", m.screen, m.wizardModel, m.wizardReady, command)
 	}
-	for steps := 0; steps < 12 && !m.wizardReady; steps++ {
-		if command == nil {
-			t.Fatal("Wizard command sequence ended before it became ready")
-		}
-		message := command()
-		m, command = update(m, message)
-		cmd = command
+	if chat.calls != 0 || len(m.wizardMessages) == 0 {
+		t.Fatalf("opening Wizard made model calls=%d messages=%v", chat.calls, m.wizardMessages)
 	}
-	if m.screen != setup.StateWizard || m.wizardModel.Ref.ModelID != "small" || len(m.wizardMessages) == 0 || !m.wizardReady {
-		t.Fatalf("Wizard state: screen=%v model=%+v messages=%v ready=%v cmd=%v", m.screen, m.wizardModel, m.wizardMessages, m.wizardReady, cmd)
+	if prepared.Ref.ModelID != "" {
+		t.Fatalf("runtime preparation blocked Wizard entry: %+v", prepared)
+	}
+	m, _ = update(m, command())
+	if prepared.Ref.ModelID != "small" || m.wizardEngine == nil || m.wizardModel.Endpoint.BaseURL != "http://127.0.0.1:18083" {
+		t.Fatalf("prepared=%+v Wizard model=%+v engine=%v", prepared, m.wizardModel, m.wizardEngine)
 	}
 }
 
-func TestBenchmarkStaysVisibleWhenNoSelectedModelCanRun(t *testing.T) {
-	completion := &appCompletionClient{}
-	benchmark := wizard.Benchmarker{
-		Client: completion,
-		Prepare: func(_ context.Context, models []setup.ModelOption) []wizard.PreparedModel {
-			return []wizard.PreparedModel{
-				{Model: models[0], Err: context.DeadlineExceeded},
-				{Model: models[1], Err: context.DeadlineExceeded},
-			}
-		},
-	}
-	m := wizardAppModel(benchmark, &appWizardClient{responses: []string{`{"type":"message","content":"unexpected","ready":true}`}}, nil)
+func TestWizardPreparationFailureDoesNotBlockApplyingDefaults(t *testing.T) {
+	var saved config.Config
+	m := wizardAppModel(func(_ context.Context, _ config.Config, model setup.ModelOption) (setup.ModelOption, error) {
+		return model, context.DeadlineExceeded
+	}, &appWizardClient{}, func(next config.Config) error {
+		saved = next
+		return nil
+	})
 	m.screen, m.workflow.State = setup.StateModels, setup.StateModels
-	m, command := m.advanceFromModels()
-	for steps := 0; steps < 6 && command != nil; steps++ {
-		m, command = update(m, command())
+	m, prepare := m.advanceFromModels()
+	m, _ = update(m, prepare())
+	if m.screen != setup.StateWizard || !m.wizardReady || m.workflow.Err == nil {
+		t.Fatalf("preparation failure blocked Wizard: screen=%v ready=%v err=%v", m.screen, m.wizardReady, m.workflow.Err)
 	}
-	if m.screen != setup.StateBenchmark || m.workflow.Err == nil {
-		t.Fatalf("screen=%v err=%v", m.screen, m.workflow.Err)
+	m, apply := update(m, key("enter"))
+	if apply == nil {
+		t.Fatal("defaults could not be applied after preparation failure")
 	}
-}
-
-func TestUnreliableFallbackKeepsThePreparedRuntimeEndpoint(t *testing.T) {
-	m := wizardAppModel(wizard.Benchmarker{}, &appWizardClient{responses: []string{`{"type":"message","content":"ready","ready":true}`}}, nil)
-	m.screen, m.workflow.State = setup.StateBenchmark, setup.StateBenchmark
-	selected := m.workflow.Draft.SelectedModels()
-	selected[1].Endpoint.BaseURL = "http://127.0.0.1:18083/v1"
-	m.wizardBenchmarkResults = []wizard.BenchmarkResult{{Model: selected[0]}, {Model: selected[1]}}
-
-	m, command := m.finishWizardBenchmark()
-	if command == nil || m.wizardModel.Ref.ModelID != "small" || m.wizardModel.Endpoint.BaseURL != "http://127.0.0.1:18083/v1" {
-		t.Fatalf("fallback model=%+v command=%v", m.wizardModel, command)
+	m, _ = update(m, apply())
+	if m.setup || m.screen != setup.StateReady || saved.Topology.Roles.Worker.Model != "small" {
+		t.Fatalf("defaults not saved: setup=%v screen=%v saved=%+v", m.setup, m.screen, saved)
 	}
 }
 
@@ -102,7 +81,7 @@ func TestWizardCanChangeDraftAndApplyIntoNormalChat(t *testing.T) {
 		`{"type":"tool","name":"enable_council","arguments":{"enabled":false}}`,
 		`{"type":"message","content":"Council disabled.","ready":true}`,
 	}}
-	m := wizardAppModel(wizard.Benchmarker{}, chat, func(next config.Config) error { saved = next; return nil })
+	m := wizardAppModel(nil, chat, func(next config.Config) error { saved = next; return nil })
 	m.wizardModel = m.workflow.Draft.SelectedModels()[0]
 	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
 		t.Fatal(err)
@@ -129,11 +108,39 @@ func TestWizardCanChangeDraftAndApplyIntoNormalChat(t *testing.T) {
 	}
 }
 
-func wizardAppModel(benchmarker wizard.Benchmarker, chat modelapi.ChatClient, save func(config.Config) error) Model {
+func TestSlashWizardReopensConfiguredSetupWithoutRunningAPrompt(t *testing.T) {
+	cfg := completeConfig()
+	chat := &appWizardClient{}
+	runs := 0
+	m := NewWithServices(cfg, Services{
+		Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event {
+			runs++
+			return nil
+		},
+		PrepareWizard: func(_ context.Context, _ config.Config, model setup.ModelOption) (setup.ModelOption, error) {
+			return model, nil
+		},
+		WizardClient: chat,
+	})
+	m.chat.SetValue("/wizard")
+	m, command := update(m, key("ctrl+enter"))
+	if command == nil || !m.setup || m.screen != setup.StateWizard || !m.wizardReturnToReady || m.wizardModel.Ref != (setup.ModelRef{EndpointID: "local", ModelID: "w"}) {
+		t.Fatalf("slash Wizard: setup=%v screen=%v return=%v model=%+v command=%v", m.setup, m.screen, m.wizardReturnToReady, m.wizardModel, command)
+	}
+	if runs != 0 || m.chat.Value() != "" {
+		t.Fatalf("slash command reached orchestration: runs=%d input=%q", runs, m.chat.Value())
+	}
+	m, _ = update(m, key("esc"))
+	if m.setup || m.screen != setup.StateReady {
+		t.Fatalf("Esc did not return to chat: setup=%v screen=%v", m.setup, m.screen)
+	}
+}
+
+func wizardAppModel(prepare WizardPrepareFunc, chat modelapi.ChatClient, save func(config.Config) error) Model {
 	cfg := config.Default()
 	cfg.Providers.Ollama.Enabled = true
 	cfg.Topology.Endpoints = []topology.Endpoint{{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:11434"}}
-	m := NewWithServices(cfg, Services{Save: save, WizardBenchmark: benchmarker, WizardClient: chat})
+	m := NewWithServices(cfg, Services{Save: save, PrepareWizard: prepare, WizardClient: chat})
 	options := []setup.ModelOption{
 		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "large"}, Endpoint: cfg.Topology.Endpoints[0], Installed: true, ParameterSize: "14B"},
 		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "small"}, Endpoint: cfg.Topology.Endpoints[0], Installed: true, ParameterSize: "3B"},

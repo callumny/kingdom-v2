@@ -45,7 +45,7 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 }
 
 // Complete performs one bounded non-streaming generation and preserves the
-// normalized timing metadata used by the setup benchmark. maxTokens <= 0 lets
+// normalized provider timing metadata. maxTokens <= 0 lets
 // the provider use its normal default.
 func (c *Client) Complete(ctx context.Context, ep topology.Endpoint, model string, msgs []Message, maxTokens int) (Completion, error) {
 	if err := ep.Validate(); err != nil {

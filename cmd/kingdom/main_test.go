@@ -86,35 +86,24 @@ func TestPrepareRuntimeConfigStartsDedicatedMLXModels(t *testing.T) {
 	}
 }
 
-func TestPrepareWizardModelsUsesIsolatedMLXBenchmarkPorts(t *testing.T) {
+func TestPrepareWizardModelUsesAnIsolatedMLXPort(t *testing.T) {
 	cfg := config.Default()
-	models := []setup.ModelOption{
-		{Ref: setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: "z-model"}, Endpoint: topology.Endpoint{ID: setup.MLXEndpointID}},
-		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "ollama-model"}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID}},
-		{Ref: setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: "a-model"}, Endpoint: topology.Endpoint{ID: setup.MLXEndpointID}},
-	}
-	var ollama []topology.Endpoint
+	model := setup.ModelOption{Ref: setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: "small-model"}, Endpoint: topology.Endpoint{ID: setup.MLXEndpointID}}
 	var mlx []localmodels.ModelServer
-	prepared := prepareWizardModels(context.Background(), cfg, models,
-		func(_ context.Context, endpoints []topology.Endpoint) error {
-			ollama = append([]topology.Endpoint(nil), endpoints...)
-			return nil
-		},
+	prepared, err := prepareWizardModel(context.Background(), cfg, model, nil,
 		func(_ context.Context, servers []localmodels.ModelServer) error {
 			mlx = append(mlx, servers...)
 			return nil
 		},
 	)
-	if len(prepared) != 3 || len(ollama) != 1 || len(mlx) != 2 {
-		t.Fatalf("prepared=%+v ollama=%+v mlx=%+v", prepared, ollama, mlx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if mlx[0].Model != "a-model" || mlx[0].Endpoint.BaseURL != "http://127.0.0.1:8083/v1" || mlx[1].Model != "z-model" || mlx[1].Endpoint.BaseURL != "http://127.0.0.1:8084/v1" {
-		t.Fatalf("MLX benchmark routes=%+v", mlx)
+	if len(mlx) != 1 || mlx[0].Model != "small-model" || mlx[0].Endpoint.BaseURL != "http://127.0.0.1:8083/v1" {
+		t.Fatalf("MLX Wizard route=%+v", mlx)
 	}
-	for _, item := range prepared {
-		if item.Err != nil {
-			t.Fatalf("preparation error: %v", item.Err)
-		}
+	if prepared.Endpoint != mlx[0].Endpoint {
+		t.Fatalf("prepared endpoint=%+v server=%+v", prepared.Endpoint, mlx[0].Endpoint)
 	}
 }
 

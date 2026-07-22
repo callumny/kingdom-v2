@@ -95,7 +95,7 @@ func TestSelectedOnlineModelSurvivesAChangedVisibleSearchCatalog(t *testing.T) {
 	}
 }
 
-func TestWorkflowIncludesModelsBeforeWizardBenchmark(t *testing.T) {
+func TestWorkflowOpensWizardAfterModels(t *testing.T) {
 	draft := selectionDraft()
 	w := &Workflow{State: StateProviders, Draft: draft}
 	if err := w.Continue(); err != nil || w.State != StateModels {
@@ -107,12 +107,12 @@ func TestWorkflowIncludesModelsBeforeWizardBenchmark(t *testing.T) {
 	if err := w.Draft.ToggleModel(ModelRef{EndpointID: "mlx-local", ModelID: "large"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Continue(); err != nil || w.State != StateBenchmark {
+	if err := w.Continue(); err != nil || w.State != StateWizard {
 		t.Fatalf("models continue state=%v err=%v", w.State, err)
 	}
 	w.Back()
 	if w.State != StateModels {
-		t.Fatalf("benchmark back=%v, want models", w.State)
+		t.Fatalf("Wizard back=%v, want models", w.State)
 	}
 }
 

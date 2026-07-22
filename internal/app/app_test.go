@@ -184,7 +184,7 @@ func TestRescanCannotContinueWithStaleResults(t *testing.T) {
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key(" "))
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateBenchmark {
+	if m.screen != setup.StateWizard {
 		t.Fatal("did not advance after current result")
 	}
 }
@@ -331,8 +331,8 @@ func TestReopenReadyConfigUsesDiscoveryWorkflow(t *testing.T) {
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
 	m, _ = update(m, key("enter"))
-	if m.screen != setup.StateBenchmark || m.workflow.State != setup.StateBenchmark {
-		t.Fatalf("discovery enter advanced to %v/%v, want benchmark", m.screen, m.workflow.State)
+	if m.screen != setup.StateWizard || m.workflow.State != setup.StateWizard {
+		t.Fatalf("discovery enter advanced to %v/%v, want Wizard", m.screen, m.workflow.State)
 	}
 }
 

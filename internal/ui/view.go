@@ -23,9 +23,8 @@ type Presentation struct {
 	ModelDownloadConfirming                                  bool
 	ModelDownloadActive                                      bool
 	ModelDownloadError                                       string
-	BenchmarkActive, WizardBusy, WizardReady, WizardApplying bool
-	BenchmarkModel, BenchmarkPhase, WizardModel, WizardInput string
-	BenchmarkResults                                         []WizardBenchmarkRow
+	WizardBusy, WizardReady, WizardApplying, WizardPreparing bool
+	WizardModel, WizardInput                                 string
 	WizardMessages                                           []string
 }
 
@@ -57,9 +56,6 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 		case setup.StateModels:
 			progress = setupProgress(2)
 			body, footer = modelsSetupView(wf, p)
-		case setup.StateBenchmark:
-			progress = setupProgress(3)
-			body, footer = benchmarkSetupView(wf, p)
 		case setup.StateWizard:
 			progress = setupProgress(3)
 			body, footer = wizardSetupView(wf, p)
