@@ -81,7 +81,7 @@ func fitRoyalLines(lines []string, terminalWidth, contentWidth int) string {
 }
 
 func setupProgress(active int) string {
-	labels := []string{"1 Providers", "2 Models", "3 Roles", "4 Review"}
+	labels := []string{"1 Providers", "2 Models", "3 Wizard"}
 	parts := make([]string, 0, len(labels)*2-1)
 	for index, label := range labels {
 		style := royalMuted

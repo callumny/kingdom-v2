@@ -186,6 +186,8 @@ type WorkflowState int
 const (
 	StateProviders WorkflowState = iota
 	StateModels
+	StateBenchmark
+	StateWizard
 	StateRoles
 	StatePerformance
 	StateReview
@@ -220,10 +222,9 @@ func (w *Workflow) Continue() error {
 		if len(w.Draft.SelectedModels()) == 0 {
 			return fmt.Errorf("select at least one model")
 		}
-		if err := w.Draft.ApplyRoleSuggestions(); err != nil {
-			return err
-		}
-		w.State = StateRoles
+		w.State = StateBenchmark
+	case StateBenchmark:
+		w.State = StateWizard
 	case StateRoles:
 		if !w.Draft.Config.Topology.Roles.King.Complete() || !w.Draft.Config.Topology.Roles.Worker.Complete() {
 			return fmt.Errorf("king and worker assignments are required")
@@ -241,7 +242,9 @@ func (w *Workflow) Continue() error {
 	return nil
 }
 func (w *Workflow) Back() {
-	if w.State == StateReview {
+	if w.State == StateWizard || w.State == StateBenchmark {
+		w.State = StateModels
+	} else if w.State == StateReview {
 		w.State = StatePerformance
 	} else if w.State == StatePerformance {
 		w.State = StateRoles

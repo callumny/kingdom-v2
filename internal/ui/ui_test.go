@@ -93,6 +93,36 @@ func TestModelRowsUseAlignedProviderStatusAndNameColumns(t *testing.T) {
 	}
 }
 
+func TestBenchmarkAndWizardViewsMatchConciseJourney(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	w.State = setup.StateBenchmark
+	benchmark := ViewWithPresentation(100, 40, true, w, Presentation{
+		BenchmarkActive: true,
+		BenchmarkModel:  "small",
+		BenchmarkPhase:  "Testing tool response",
+		BenchmarkResults: []WizardBenchmarkRow{
+			{Provider: "Ollama", Model: "large", Status: "24.0 tok/s · reliable"},
+		},
+	}).Content
+	for _, want := range []string{"Finding your Setup Wizard", "fastest reliable", "large", "24.0 tok/s", "small", "Testing tool response"} {
+		if !strings.Contains(benchmark, want) {
+			t.Fatalf("benchmark missing %q: %s", want, benchmark)
+		}
+	}
+
+	w.State = setup.StateWizard
+	wizardView := ViewWithPresentation(100, 40, true, w, Presentation{
+		WizardModel:    "small · 71.0 tok/s",
+		WizardMessages: []string{"Wizard: I prepared a sensible setup."},
+		WizardReady:    true,
+	}).Content
+	for _, want := range []string{"Wizard", "small · 71.0 tok/s", "I prepared a sensible setup", "King", "Worker", "Council", "Apply & launch", "Ctrl+Enter Send"} {
+		if !strings.Contains(wizardView, want) {
+			t.Fatalf("Wizard missing %q: %s", want, wizardView)
+		}
+	}
+}
+
 func assertViewFits(t *testing.T, view string, width, height int) {
 	t.Helper()
 	lines := strings.Split(view, "\n")
