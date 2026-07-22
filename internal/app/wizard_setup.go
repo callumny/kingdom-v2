@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -33,6 +34,16 @@ type wizardApplyMsg struct {
 	err        error
 }
 
+type runtimeWarmResult struct {
+	Config config.Config
+	Err    error
+}
+
+type wizardWarmMsg struct {
+	generation uint64
+	result     runtimeWarmResult
+}
+
 func (m Model) beginImmediateWizard(returnToReady bool) (Model, tea.Cmd) {
 	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
 		m.workflow.Err = err
@@ -48,28 +59,92 @@ func (m Model) beginImmediateWizard(returnToReady bool) (Model, tea.Cmd) {
 	}
 	m.wizardGeneration++
 	generation := m.wizardGeneration
-	ctx, cancel := context.WithCancel(context.Background())
-	m.wizardCancel = cancel
 	m.wizardModel = model
 	m.wizardReturnToReady = returnToReady
 	m.startWizard()
 	m.wizardMessages = []string{"Wizard: I prepared sensible defaults and selected your Worker model for a fast setup conversation. You can apply them now or ask for one change."}
 	m.wizardReady = true
 	m.workflow.Err = nil
-	if m.prepareWizard == nil {
-		cancel()
-		m.wizardCancel = nil
+	var prepareCommand tea.Cmd
+	if m.prepareWizard != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		m.wizardCancel = cancel
+		m.wizardPreparing = true
+		m.wizardEngine = nil
+		prepare := m.prepareWizard
+		cfg := m.workflow.Draft.Config
+		prepareCommand = func() tea.Msg {
+			defer cancel()
+			prepared, err := prepare(ctx, cfg, model)
+			return wizardPreparedMsg{generation: generation, model: prepared, err: err}
+		}
+	}
+	if prepareCommand != nil {
+		return m, prepareCommand
+	}
+	return m.beginWizardWarmup()
+}
+
+func (m Model) beginWizardWarmup() (Model, tea.Cmd) {
+	if m.warmRun == nil {
 		return m, nil
 	}
-	m.wizardPreparing = true
-	m.wizardEngine = nil
-	prepare := m.prepareWizard
-	cfg := m.workflow.Draft.Config
-	return m, func() tea.Msg {
-		defer cancel()
-		prepared, err := prepare(ctx, cfg, model)
-		return wizardPreparedMsg{generation: generation, model: prepared, err: err}
+	if m.wizardWarmCancel != nil {
+		m.wizardWarmCancel()
 	}
+	m.wizardWarmGeneration++
+	generation := m.wizardWarmGeneration
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wizardWarmCancel = cancel
+	m.wizardWarming = true
+	cfg := m.workflow.Draft.Config
+	m.runtimeWarmSignature = configSignature(cfg)
+	results := make(chan runtimeWarmResult, 1)
+	m.runtimeWarm = results
+	warm := m.warmRun
+	return m, func() tea.Msg {
+		runtimeConfig, err := warm(ctx, cfg)
+		result := runtimeWarmResult{Config: runtimeConfig, Err: err}
+		results <- result
+		close(results)
+		return wizardWarmMsg{generation: generation, result: result}
+	}
+}
+
+func configSignature(cfg config.Config) string {
+	endpointIDs := map[string]bool{
+		cfg.Topology.Roles.King.EndpointID:   true,
+		cfg.Topology.Roles.Worker.EndpointID: true,
+	}
+	if cfg.CouncilEnabled {
+		endpointIDs[cfg.Topology.Roles.Council.EndpointID] = true
+	}
+	endpoints := make([]topology.Endpoint, 0, len(endpointIDs))
+	for _, endpoint := range cfg.Topology.Endpoints {
+		if endpointIDs[endpoint.ID] {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].ID < endpoints[j].ID })
+	operational := struct {
+		Version           int
+		Providers         config.Providers
+		CouncilEnabled    bool
+		CouncilSize       int
+		WorkerConcurrency int
+		Roles             topology.Roles
+		Endpoints         []topology.Endpoint
+	}{
+		Version:           cfg.Version,
+		Providers:         cfg.Providers,
+		CouncilEnabled:    cfg.CouncilEnabled,
+		CouncilSize:       cfg.CouncilSize,
+		WorkerConcurrency: cfg.WorkerConcurrency,
+		Roles:             cfg.Topology.Roles,
+		Endpoints:         endpoints,
+	}
+	encoded, _ := json.Marshal(operational)
+	return string(encoded)
 }
 
 func selectedWizardModel(draft setup.Draft) (setup.ModelOption, bool) {
@@ -158,6 +233,7 @@ func (m Model) handleWizardKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 			m.wizardCancel()
 		}
 		m.wizardGeneration++
+		m.cancelWizardWarmup()
 		if m.wizardReturnToReady {
 			m.setup = false
 			m.workflow.State = setup.StateReady
@@ -207,6 +283,7 @@ func (m Model) openManualSetup() Model {
 		m.wizardCancel = nil
 	}
 	m.wizardGeneration++
+	m.cancelWizardWarmup()
 	m.wizardBusy = false
 	m.wizardApplying = false
 	m.wizardPreparing = false
@@ -224,6 +301,17 @@ func (m Model) openManualSetup() Model {
 		}
 	}
 	return m
+}
+
+func (m *Model) cancelWizardWarmup() {
+	if m.wizardWarmCancel != nil {
+		m.wizardWarmCancel()
+		m.wizardWarmCancel = nil
+	}
+	m.wizardWarmGeneration++
+	m.wizardWarming = false
+	m.runtimeWarm = nil
+	m.runtimeWarmSignature = ""
 }
 
 func (m Model) returnToWizardFromManual() (Model, tea.Cmd) {

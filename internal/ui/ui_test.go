@@ -101,8 +101,9 @@ func TestWizardViewMatchesConciseJourney(t *testing.T) {
 		WizardMessages:  []string{"Wizard: I prepared a sensible setup."},
 		WizardReady:     true,
 		WizardPreparing: true,
+		WizardWarming:   true,
 	}).Content
-	for _, want := range []string{"Wizard", "small · fast setup model", "Starting the local Wizard model", "I prepared a sensible setup", "King", "Worker", "Council", "Concurrent workers", "Apply & launch", "Ctrl+Enter Send", "Tab Manual setup"} {
+	for _, want := range []string{"Wizard", "small · fast setup model", "Starting the local Wizard model", "Preparing the King and local servers", "I prepared a sensible setup", "King", "Worker", "Council", "Concurrent workers", "Apply & launch", "Ctrl+Enter Send", "Tab Manual setup"} {
 		if !strings.Contains(wizardView, want) {
 			t.Fatalf("Wizard missing %q: %s", want, wizardView)
 		}

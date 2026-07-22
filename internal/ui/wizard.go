@@ -20,6 +20,9 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 	if p.WizardPreparing {
 		body = append(body, royalMuted.Render("Starting the local Wizard model in the background…"), "")
 	}
+	if p.WizardWarming {
+		body = append(body, royalMuted.Render("Preparing the King and local servers in the background…"), "")
+	}
 	start := max(0, len(p.WizardMessages)-4)
 	for _, message := range p.WizardMessages[start:] {
 		style := royalCyan

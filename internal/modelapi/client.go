@@ -53,6 +53,72 @@ func (c *Client) ChatJSON(ctx context.Context, ep topology.Endpoint, model strin
 	return completion.Content, err
 }
 
+// PreloadOllama asks Ollama to load a model into memory without generating
+// text. Keeping the King resident removes model-loading latency from the first
+// user prompt.
+func (c *Client) PreloadOllama(ctx context.Context, ep topology.Endpoint, model string) error {
+	if err := ep.Validate(); err != nil {
+		return err
+	}
+	if ep.Kind != topology.KindOllama {
+		return fmt.Errorf("Ollama endpoint required")
+	}
+	if strings.TrimSpace(model) == "" {
+		return fmt.Errorf("model required")
+	}
+	u, err := url.JoinPath(strings.TrimRight(ep.BaseURL, "/"), "/api/generate")
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]any{
+		"model":      model,
+		"prompt":     "",
+		"stream":     false,
+		"keep_alive": "10m",
+	})
+	reqctx := ctx
+	cancel := func() {}
+	if c.Timeout > 0 {
+		reqctx, cancel = context.WithTimeout(ctx, c.Timeout)
+	}
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	httpClient := c.HTTP
+	if httpClient == nil {
+		httpClient = NewClient().HTTP
+	} else {
+		copy := *httpClient
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		httpClient = &copy
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if reqctx.Err() != nil {
+			return reqctx.Err()
+		}
+		return err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, c.limit()+1))
+	resp.Body.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if int64(len(data)) > c.limit() {
+		return fmt.Errorf("response exceeds limit")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("http status %d: %s", resp.StatusCode, sanitize(data))
+	}
+	return nil
+}
+
 // Complete performs one bounded non-streaming generation and preserves the
 // normalized provider timing metadata. maxTokens <= 0 lets
 // the provider use its normal default.

@@ -218,6 +218,73 @@ func TestRunPreparationTransformsRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestFirstRunReusesTheCompletedWizardWarmup(t *testing.T) {
+	cfg := completeConfig()
+	runtimeConfig := cfg
+	runtimeConfig.Topology.Roles.King.Model = "warmed-king"
+	warmed := make(chan runtimeWarmResult, 1)
+	warmed <- runtimeWarmResult{Config: runtimeConfig}
+	close(warmed)
+	prepareCalls := 0
+	used := make(chan config.Config, 1)
+	m := NewWithServices(cfg, Services{
+		PrepareRun: func(context.Context, config.Config) (config.Config, error) {
+			prepareCalls++
+			return config.Config{}, errors.New("should not prepare twice")
+		},
+		Run: func(_ context.Context, next config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+			used <- next
+			ch := make(chan orchestration.Event, 1)
+			ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
+			close(ch)
+			return ch
+		},
+	})
+	m.runtimeWarm = warmed
+	m.runtimeWarmSignature = configSignature(cfg)
+	m.chat.SetValue("hello")
+	m, command := update(m, key("ctrl+enter"))
+	m, command = update(m, command())
+	if prepareCalls != 0 {
+		t.Fatalf("prepare calls=%d command=%v", prepareCalls, command)
+	}
+	if got := (<-used).Topology.Roles.King.Model; got != "warmed-king" {
+		t.Fatalf("runtime King=%q", got)
+	}
+}
+
+func TestFailedWizardWarmupFallsBackToNormalPreparation(t *testing.T) {
+	cfg := completeConfig()
+	warmed := make(chan runtimeWarmResult, 1)
+	warmed <- runtimeWarmResult{Err: errors.New("background start failed")}
+	close(warmed)
+	prepareCalls := 0
+	m := NewWithServices(cfg, Services{
+		PrepareRun: func(_ context.Context, next config.Config) (config.Config, error) {
+			prepareCalls++
+			return next, nil
+		},
+		Run: func(_ context.Context, _ config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+			stream := make(chan orchestration.Event, 1)
+			stream <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
+			close(stream)
+			return stream
+		},
+	})
+	m.runtimeWarm = warmed
+	m.runtimeWarmSignature = configSignature(cfg)
+	stream := m.startRunStream(context.Background(), cfg, "hello", nil)
+	first := <-stream
+	if first.Type != orchestration.EventRuntimePreparing {
+		t.Fatalf("first event=%v", first.Type)
+	}
+	for range stream {
+	}
+	if prepareCalls != 1 {
+		t.Fatalf("prepare calls=%d", prepareCalls)
+	}
+}
+
 func TestRunPreparationFailureDoesNotStartOrchestration(t *testing.T) {
 	runs := 0
 	m := NewWithServices(completeConfig(), Services{

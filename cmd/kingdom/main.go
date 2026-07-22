@@ -78,6 +78,9 @@ func main() {
 		PrepareRun: func(ctx context.Context, cfg config.Config) (config.Config, error) {
 			return prepareRuntimeConfig(ctx, cfg, localModelManager.EnsureOllamaServers, localModelManager.EnsureMLXServers)
 		},
+		WarmRun: func(ctx context.Context, cfg config.Config) (config.Config, error) {
+			return warmRuntimeConfig(ctx, cfg, localModelManager.EnsureOllamaServers, localModelManager.EnsureMLXServers, client.PreloadOllama)
+		},
 		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
 			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active), orchestration.WithMemory(memoryStore, sessionID, 6)).Stream(ctx, prompt)
 		},
@@ -141,6 +144,36 @@ func prepareRuntimeConfig(
 	return plan.Config, nil
 }
 
+func warmRuntimeConfig(
+	ctx context.Context,
+	persisted config.Config,
+	ensureOllama func(context.Context, []topology.Endpoint) error,
+	ensureMLX func(context.Context, []localmodels.ModelServer) error,
+	preloadOllama func(context.Context, topology.Endpoint, string) error,
+) (config.Config, error) {
+	runtimeConfig, err := prepareRuntimeConfig(ctx, persisted, ensureOllama, ensureMLX)
+	if err != nil {
+		return config.Config{}, err
+	}
+	king := runtimeConfig.Topology.Roles.King
+	for _, endpoint := range runtimeConfig.Topology.Endpoints {
+		if endpoint.ID != king.EndpointID {
+			continue
+		}
+		if endpoint.Kind != topology.KindOllama {
+			return runtimeConfig, nil
+		}
+		if preloadOllama == nil {
+			return config.Config{}, fmt.Errorf("preload Ollama King: model client is unavailable")
+		}
+		if err := preloadOllama(ctx, endpoint, king.Model); err != nil {
+			return config.Config{}, fmt.Errorf("preload Ollama King: %w", err)
+		}
+		return runtimeConfig, nil
+	}
+	return config.Config{}, fmt.Errorf("prepare King: runtime endpoint %q is unavailable", king.EndpointID)
+}
+
 func prepareWizardModel(
 	ctx context.Context,
 	cfg config.Config,
@@ -148,9 +181,23 @@ func prepareWizardModel(
 	ensureOllama func(context.Context, []topology.Endpoint) error,
 	ensureMLX func(context.Context, []localmodels.ModelServer) error,
 ) (setup.ModelOption, error) {
+	plan, err := config.BuildRuntimePlan(cfg)
+	if err != nil {
+		return model, fmt.Errorf("plan Wizard runtime: %w", err)
+	}
 	switch model.Ref.EndpointID {
 	case setup.OllamaEndpointID:
-		model.Endpoint = topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", cfg.Providers.Ollama.Port)}
+		var found bool
+		for _, route := range plan.OllamaRoutes {
+			if route.Model == model.Ref.ModelID {
+				model.Endpoint = route.Endpoint
+				found = true
+				break
+			}
+		}
+		if !found {
+			return model, fmt.Errorf("selected Ollama Wizard model is not in the runtime plan")
+		}
 		if ensureOllama == nil {
 			return model, fmt.Errorf("Ollama runtime manager is unavailable")
 		}
@@ -159,11 +206,17 @@ func prepareWizardModel(
 		}
 		return model, nil
 	case setup.MLXEndpointID:
-		port := cfg.Providers.MLX.Port + setup.MaxSelectedModels
-		if port > 65535 {
-			return model, fmt.Errorf("MLX Wizard port exceeds 65535; choose a lower MLX base port")
+		var found bool
+		for _, route := range plan.MLXRoutes {
+			if route.Model == model.Ref.ModelID {
+				model.Endpoint = route.Endpoint
+				found = true
+				break
+			}
 		}
-		model.Endpoint = topology.Endpoint{ID: "mlx-wizard", Name: "MLX Wizard", Kind: topology.KindOpenAICompatible, BaseURL: fmt.Sprintf("http://127.0.0.1:%d/v1", port)}
+		if !found {
+			return model, fmt.Errorf("selected MLX Wizard model is not in the runtime plan")
+		}
 		if ensureMLX == nil {
 			return model, fmt.Errorf("MLX runtime manager is unavailable")
 		}

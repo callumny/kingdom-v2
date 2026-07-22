@@ -60,6 +60,32 @@ func TestJSONChatRequestsStructuredProviderOutput(t *testing.T) {
 	}
 }
 
+func TestPreloadOllamaLoadsModelWithoutGeneratingText(t *testing.T) {
+	var path string
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		_, _ = w.Write([]byte(`{"done":true}`))
+	}))
+	defer server.Close()
+
+	err := NewClient().PreloadOllama(context.Background(), ep(server.URL, topology.KindOllama), "king-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/generate" || payload["model"] != "king-model" || payload["keep_alive"] != "10m" || payload["prompt"] != "" {
+		t.Fatalf("path=%q payload=%+v", path, payload)
+	}
+}
+
+func TestPreloadOllamaRejectsOtherProviderKinds(t *testing.T) {
+	err := NewClient().PreloadOllama(context.Background(), ep("http://localhost", topology.KindOpenAICompatible), "model")
+	if err == nil {
+		t.Fatal("expected provider validation error")
+	}
+}
+
 func TestCompleteReturnsTimingAndLimitsProviderGeneration(t *testing.T) {
 	for _, test := range []struct {
 		kind       topology.EndpointKind

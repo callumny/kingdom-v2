@@ -22,6 +22,7 @@ type Reply struct {
 	Content  string
 	Ready    bool
 	Fallback bool
+	Changed  bool
 }
 
 type Engine struct {
@@ -100,7 +101,7 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 				continue
 			}
 			if len(completedOrder) > 0 {
-				return Reply{Content: e.session.ChangeSummary(completedOrder), Ready: e.session.Ready()}, nil
+				return Reply{Content: e.session.ChangeSummary(completedOrder), Ready: e.session.Ready(), Changed: true}, nil
 			}
 			return Reply{Content: action.Content, Ready: action.Ready}, nil
 		case "tool":

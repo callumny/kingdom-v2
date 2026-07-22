@@ -52,6 +52,77 @@ func TestModelsOpenWizardImmediatelyWithTheSmallestSelectedModel(t *testing.T) {
 	}
 }
 
+func TestWizardWarmsTheProposedRuntimeWithoutBlockingEntry(t *testing.T) {
+	var warmed config.Config
+	m := wizardAppModel(nil, &appWizardClient{}, nil)
+	m.warmRun = func(_ context.Context, cfg config.Config) (config.Config, error) {
+		warmed = cfg
+		cfg.Topology.Roles.King.Model = "runtime-king"
+		return cfg, nil
+	}
+	m.screen, m.workflow.State = setup.StateModels, setup.StateModels
+
+	m, command := m.advanceFromModels()
+	if command == nil || !m.wizardWarming || warmed.Topology.Roles.King.Model != "" {
+		t.Fatalf("warm-up blocked entry: warming=%v warmed=%+v command=%v", m.wizardWarming, warmed, command)
+	}
+	m, _ = update(m, command())
+	if m.wizardWarming || warmed.Topology.Roles.King.Model != "large" || m.runtimeWarmSignature == "" || m.runtimeWarm == nil {
+		t.Fatalf("warm-up did not complete: warming=%v warmed=%+v signature=%q channel=%v", m.wizardWarming, warmed, m.runtimeWarmSignature, m.runtimeWarm)
+	}
+}
+
+func TestWizardConfigChangeRestartsRuntimeWarmup(t *testing.T) {
+	calls := 0
+	m := wizardAppModel(nil, &appWizardClient{}, nil)
+	m.warmRun = func(_ context.Context, cfg config.Config) (config.Config, error) {
+		calls++
+		return cfg, nil
+	}
+	m.screen, m.workflow.State = setup.StateModels, setup.StateModels
+	m, first := m.advanceFromModels()
+	m, _ = update(m, first())
+
+	m, second := update(m, wizardReplyMsg{generation: m.wizardGeneration, reply: wizard.Reply{Content: "Concurrent workers set to 2.", Ready: true, Changed: true}})
+	if second == nil || !m.wizardWarming {
+		t.Fatalf("changed proposal did not restart warm-up: warming=%v command=%v", m.wizardWarming, second)
+	}
+	m, _ = update(m, second())
+	if calls != 2 || m.wizardWarming {
+		t.Fatalf("warm-up calls=%d warming=%v", calls, m.wizardWarming)
+	}
+}
+
+func TestRuntimeWarmSignatureIgnoresUnselectedDiscoveryEndpoints(t *testing.T) {
+	cfg := completeConfig()
+	withUnused := cfg
+	withUnused.Topology.Endpoints = append(withUnused.Topology.Endpoints, topology.Endpoint{
+		ID: "unused", Name: "Unused", Kind: topology.KindOllama, BaseURL: "http://127.0.0.1:19999",
+	})
+	if configSignature(cfg) != configSignature(withUnused) {
+		t.Fatal("an unused discovery endpoint invalidated the prepared runtime")
+	}
+	withChange := cfg
+	withChange.WorkerConcurrency++
+	if configSignature(cfg) == configSignature(withChange) {
+		t.Fatal("a runtime setting change reused stale preparation")
+	}
+}
+
+func TestManualSetupWarmsTheReviewedRuntime(t *testing.T) {
+	m := wizardAppModel(nil, &appWizardClient{}, nil)
+	m.warmRun = func(_ context.Context, cfg config.Config) (config.Config, error) { return cfg, nil }
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	m.wizardManual = true
+	m.screen, m.workflow.State = setup.StatePerformance, setup.StatePerformance
+	m, command := update(m, key("enter"))
+	if m.screen != setup.StateReview || !m.wizardWarming || command == nil {
+		t.Fatalf("screen=%v warming=%v command=%v", m.screen, m.wizardWarming, command)
+	}
+}
+
 func TestWizardPreparationFailureDoesNotBlockApplyingDefaults(t *testing.T) {
 	var saved config.Config
 	m := wizardAppModel(func(_ context.Context, _ config.Config, model setup.ModelOption) (setup.ModelOption, error) {

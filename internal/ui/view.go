@@ -24,6 +24,7 @@ type Presentation struct {
 	ModelDownloadActive                                      bool
 	ModelDownloadError                                       string
 	WizardBusy, WizardReady, WizardApplying, WizardPreparing bool
+	WizardWarming                                            bool
 	ManualSetup                                              bool
 	WizardModel, WizardInput                                 string
 	WizardMessages                                           []string
@@ -82,6 +83,9 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 				fmt.Sprintf("Concurrent workers: %d", wf.Draft.Config.WorkerConcurrency),
 			)
 			body = append(body, reviewOllamaSummary(wf.Draft.Config)...)
+			if p.WizardWarming {
+				body = append(body, "", royalMuted.Render("Preparing the King and local servers in the background…"))
+			}
 			for _, e := range wf.Draft.PersistenceEndpoints(p.PreviousEndpoints) {
 				body = append(body, fmt.Sprintf("Endpoint: %s (%s)", e.Name, e.BaseURL))
 			}

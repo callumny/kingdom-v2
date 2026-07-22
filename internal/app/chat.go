@@ -32,13 +32,17 @@ func (m Model) startRunStream(ctx context.Context, cfg config.Config, prompt str
 				return false
 			}
 		}
-		if !emit(orchestration.Event{Type: orchestration.EventRuntimePreparing}) {
-			return
-		}
-		runtimeConfig, err := m.prepareRun(ctx, cfg)
-		if err != nil {
-			emit(orchestration.Event{Type: orchestration.EventFailed, Message: err.Error()})
-			return
+		runtimeConfig, warmed := m.awaitRuntimeWarmup(ctx, cfg)
+		if !warmed {
+			if !emit(orchestration.Event{Type: orchestration.EventRuntimePreparing}) {
+				return
+			}
+			var err error
+			runtimeConfig, err = m.prepareRun(ctx, cfg)
+			if err != nil {
+				emit(orchestration.Event{Type: orchestration.EventFailed, Message: err.Error()})
+				return
+			}
 		}
 		stream := m.run(ctx, runtimeConfig, prompt, active)
 		if stream == nil {
@@ -60,6 +64,21 @@ func (m Model) startRunStream(ctx context.Context, cfg config.Config, prompt str
 		}
 	}()
 	return out
+}
+
+func (m Model) awaitRuntimeWarmup(ctx context.Context, cfg config.Config) (config.Config, bool) {
+	if m.runtimeWarm == nil || m.runtimeWarmSignature != configSignature(cfg) {
+		return config.Config{}, false
+	}
+	select {
+	case result, ok := <-m.runtimeWarm:
+		if !ok || result.Err != nil {
+			return config.Config{}, false
+		}
+		return result.Config, true
+	case <-ctx.Done():
+		return config.Config{}, false
+	}
 }
 
 // nextEvent returns a command that waits for the next event from the active

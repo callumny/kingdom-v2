@@ -41,6 +41,12 @@ type Model struct {
 	chatError               string
 	run                     RunFunc
 	prepareRun              PrepareRunFunc
+	warmRun                 PrepareRunFunc
+	runtimeWarm             <-chan runtimeWarmResult
+	runtimeWarmSignature    string
+	wizardWarming           bool
+	wizardWarmCancel        context.CancelFunc
+	wizardWarmGeneration    uint64
 	runCancel               context.CancelFunc
 	runCh                   <-chan orchestration.Event
 	runGen                  uint64
@@ -107,6 +113,7 @@ type Services struct {
 	Save          func(config.Config) error
 	Run           RunFunc
 	PrepareRun    PrepareRunFunc
+	WarmRun       PrepareRunFunc
 	Skills        SkillLibrary
 	Memory        MemoryBrowser
 	LocalModels   LocalModelManager
@@ -197,6 +204,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		save:            services.Save,
 		run:             services.Run,
 		prepareRun:      services.PrepareRun,
+		warmRun:         services.WarmRun,
 		skills:          skillState{library: services.Skills},
 		memory:          memoryState{store: services.Memory},
 		localModels:     localModelState{manager: services.LocalModels},
@@ -242,6 +250,7 @@ func (m Model) beginDiscovery() (Model, tea.Cmd) {
 
 func (m Model) startSetup() Model {
 	m.gate.Cancel()
+	m.cancelWizardWarmup()
 	m.saveGen++
 	m.setup = true
 	m.workflow = setup.Start(m.config, m.defaults)
@@ -363,11 +372,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wizardCancel = nil
 		if x.err != nil {
 			m.workflow.Err = fmt.Errorf("Wizard conversation is unavailable: %w. You can still apply the proposed defaults", x.err)
-			return m, nil
+			return m.beginWizardWarmup()
 		}
 		m.wizardModel = x.model
 		m.wizardEngine = wizard.NewEngine(m.wizardClient, m.wizardModel, m.wizardSession)
 		m.workflow.Err = nil
+		return m.beginWizardWarmup()
 	case wizardReplyMsg:
 		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
 			return m, nil
@@ -380,6 +390,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workflow.Err = nil
 		m.wizardMessages = append(m.wizardMessages, "Wizard: "+x.reply.Content)
 		m.wizardReady = x.reply.Ready
+		if x.reply.Changed {
+			return m.beginWizardWarmup()
+		}
+	case wizardWarmMsg:
+		if x.generation != m.wizardWarmGeneration {
+			return m, nil
+		}
+		m.wizardWarming = false
+		m.wizardWarmCancel = nil
+		if x.result.Err != nil && x.result.Err != context.Canceled {
+			m.workflow.Err = fmt.Errorf("background model preparation failed: %w; the first prompt will retry", x.result.Err)
+		}
 	case wizardApplyMsg:
 		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
 			return m, nil
@@ -609,6 +631,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.wizardCancel != nil {
 				m.wizardCancel()
 			}
+			m.cancelWizardWarmup()
 			return m, tea.Quit
 		}
 		if m.skills.open {
@@ -849,6 +872,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.workflow.Err = nil
 					m.screen = m.workflow.State
+					if m.wizardManual && m.screen == setup.StateReview {
+						return m.beginWizardWarmup()
+					}
 				}
 			}
 		case setup.StateReview:
@@ -1001,6 +1027,7 @@ func (m Model) presentation() ui.Presentation {
 		WizardReady:             m.wizardReady,
 		WizardApplying:          m.wizardApplying,
 		WizardPreparing:         m.wizardPreparing,
+		WizardWarming:           m.wizardWarming,
 		ManualSetup:             m.wizardManual,
 	}
 }
