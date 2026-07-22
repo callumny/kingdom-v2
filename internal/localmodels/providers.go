@@ -187,12 +187,33 @@ func scanMLXCache(root string) ([]Model, error) {
 			}
 			path := filepath.Join(snapshotsRoot, snapshot.Name())
 			if completeMLXSnapshot(path) {
-				models = append(models, Model{ID: modelID, LocalPath: path})
+				models = append(models, Model{ID: modelID, LocalPath: path, SizeBytes: mlxSnapshotSize(path)})
 				break
 			}
 		}
 	}
 	return normalizedModels(models), nil
+}
+
+func mlxSnapshotSize(path string) int64 {
+	const maxFiles = 4096
+	var total int64
+	files := 0
+	_ = filepath.WalkDir(path, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return nil
+		}
+		files++
+		if files > maxFiles {
+			return filepath.SkipAll
+		}
+		info, err := os.Stat(current)
+		if err == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 func completeMLXSnapshot(path string) bool {

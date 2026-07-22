@@ -56,3 +56,15 @@ func TestCatalogIsStableAndDropsInvalidOrDuplicateEntries(t *testing.T) {
 		t.Fatalf("catalog=%+v, want stable first/second", catalog)
 	}
 }
+
+func TestCatalogInfersParameterSizeFromMLXModelName(t *testing.T) {
+	draft := NewDraft(config.Default(), nil)
+	draft.ReplaceCatalog([]ModelOption{{
+		Ref:      ModelRef{EndpointID: MLXEndpointID, ModelID: "mlx-community/Ornith-1.0-9B-6bit"},
+		Endpoint: topology.Endpoint{ID: MLXEndpointID, Name: "MLX"},
+	}})
+	catalog := draft.Catalog()
+	if len(catalog) != 1 || catalog[0].ParameterSize != "9B" {
+		t.Fatalf("catalog=%+v", catalog)
+	}
+}

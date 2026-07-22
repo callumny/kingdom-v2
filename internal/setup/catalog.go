@@ -58,6 +58,9 @@ func (d *Draft) ReplaceCatalog(options []ModelOption) {
 		if option.Ref.EndpointID == "" || option.Ref.ModelID == "" || seen[option.Ref] {
 			continue
 		}
+		if option.ParameterSize == "" {
+			option.ParameterSize = inferredParameterSize(option.Ref.ModelID)
+		}
 		seen[option.Ref] = true
 		normalized = append(normalized, option)
 		if d.IsModelSelected(option.Ref) {

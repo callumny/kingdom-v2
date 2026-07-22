@@ -380,6 +380,17 @@ func TestMLXCacheIgnoresIncompleteModels(t *testing.T) {
 	}
 }
 
+func TestMLXCacheReportsInstalledSnapshotSize(t *testing.T) {
+	root := createCachedMLXModel(t, "mlx-community", "Qwen-4bit")
+	models, err := scanMLXCache(root)
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	if models[0].SizeBytes != int64(len(`{}`)+len("weights")) {
+		t.Fatalf("size=%d", models[0].SizeBytes)
+	}
+}
+
 func TestOSSystemOutputIsBoundedAndCancellationAware(t *testing.T) {
 	t.Setenv("KINGDOM_LOCALMODELS_HELPER", "1")
 	system := OSSystem{}

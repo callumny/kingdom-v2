@@ -12,6 +12,14 @@ import (
 
 var parameterHintPattern = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)b(?:[^a-z0-9]|$)`)
 
+func inferredParameterSize(modelID string) string {
+	match := parameterHintPattern.FindStringSubmatch(modelID)
+	if len(match) != 2 {
+		return ""
+	}
+	return strings.ToUpper(match[1]) + "B"
+}
+
 // ApplyRoleSuggestions fills invalid or incomplete roles from the selected
 // model pool. Existing valid choices are preserved when the user revisits the
 // Models screen without changing that pool.
