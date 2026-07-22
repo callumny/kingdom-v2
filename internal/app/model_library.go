@@ -14,7 +14,17 @@ import (
 )
 
 func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
-	if m.modelInventoryLoading {
+	if m.modelInventoryLoading || m.modelRemoveActive {
+		return m, nil
+	}
+	if m.modelRemoveConfirming {
+		switch key {
+		case "y", "enter":
+			return m.beginModelRemoval()
+		case "n", "esc":
+			m.modelRemoveConfirming = false
+			m.modelRemoveTarget = setup.ModelOption{}
+		}
 		return m, nil
 	}
 	if m.modelDownloadConfirming {
@@ -30,6 +40,7 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 	if key == "/" && !m.modelSearchActive {
 		m.modelSearchActive = true
 		m.modelSearchWarning = ""
+		m.modelRemoveNotice = ""
 		return m, nil
 	}
 	if m.modelSearchActive {
@@ -74,6 +85,24 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 		if m.modelCursor >= 0 && m.modelCursor < len(catalog) {
 			m.workflow.Err = m.workflow.Draft.ToggleModel(catalog[m.modelCursor].Ref)
 		}
+	case "d":
+		m.modelRemoveNotice = ""
+		if m.modelCursor < 0 || m.modelCursor >= len(catalog) {
+			return m, nil
+		}
+		option := catalog[m.modelCursor]
+		if !option.Installed {
+			m.workflow.Err = fmt.Errorf("only installed models can be uninstalled")
+			return m, nil
+		}
+		if m.modelRemover == nil {
+			m.workflow.Err = fmt.Errorf("model uninstaller is unavailable")
+			return m, nil
+		}
+		m.modelRemoveTarget = option
+		m.modelRemoveConfirming = true
+		m.modelRemoveNotice = ""
+		m.workflow.Err = nil
 	case "enter":
 		if len(m.workflow.Draft.SelectedModels()) == 0 {
 			m.workflow.Err = fmt.Errorf("select at least one model")
@@ -112,6 +141,8 @@ func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
 	m.modelQuery = ""
 	m.modelSearchActive = false
 	m.modelDownloadConfirming = false
+	m.modelRemoveConfirming = false
+	m.modelRemoveTarget = setup.ModelOption{}
 	m.cancelModelSearch()
 	m.workflow.Err = nil
 	m.workflow.Draft.ReplaceCatalog([]setup.ModelOption{})

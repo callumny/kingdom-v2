@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,20 @@ type fakeModelSearcher struct {
 type fakeModelDownloader struct {
 	requests []localmodels.DownloadRequest
 	err      error
+}
+
+type fakeModelRemover struct {
+	requests []localmodels.RemoveRequest
+	err      error
+	removed  func(localmodels.RemoveRequest)
+}
+
+func (f *fakeModelRemover) Remove(_ context.Context, request localmodels.RemoveRequest) error {
+	f.requests = append(f.requests, request)
+	if f.err == nil && f.removed != nil {
+		f.removed(request)
+	}
+	return f.err
 }
 
 func (f *fakeModelDownloader) Download(_ context.Context, request localmodels.DownloadRequest, report localmodels.DownloadReporter) error {
@@ -178,6 +193,76 @@ func TestConfirmedDownloadCompletesBeforeWizard(t *testing.T) {
 	}
 }
 
+func TestInstalledModelRequiresConfirmationBeforeUninstall(t *testing.T) {
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "qwen3:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama", BaseURL: "http://127.0.0.1:11434"},
+	}}}
+	remover := &fakeModelRemover{}
+	m := modelAtModelsScreenWithServices(t, manager, Services{ModelRemove: remover})
+	m, _ = update(m, key(" "))
+	m, command := update(m, key("d"))
+
+	view := m.View().Content
+	for _, want := range []string{"Uninstall Ollama model?", "qwen3:8b", "permanently removes", "removed from your current selection", "Enter / y Uninstall"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("uninstall confirmation missing %q: %s", want, view)
+		}
+	}
+	if command != nil || len(remover.requests) != 0 {
+		t.Fatalf("uninstall ran before confirmation: command=%v requests=%+v", command, remover.requests)
+	}
+	m, _ = update(m, key("n"))
+	if strings.Contains(m.View().Content, "Uninstall Ollama model?") || len(remover.requests) != 0 {
+		t.Fatalf("cancel did not preserve model: %s requests=%+v", m.View().Content, remover.requests)
+	}
+}
+
+func TestConfirmedUninstallRefreshesInventoryAndSelection(t *testing.T) {
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindMLX, Models: []localmodels.Model{{ID: "mlx-community/Qwen3-4B-4bit"}}, Endpoint: topology.Endpoint{ID: setup.MLXEndpointID, Name: "MLX", BaseURL: "http://127.0.0.1:8080/v1"},
+	}}}
+	remover := &fakeModelRemover{removed: func(localmodels.RemoveRequest) {
+		manager.runtimes[0].Models = nil
+	}}
+	m := modelAtModelsScreenWithServices(t, manager, Services{ModelRemove: remover})
+	m, _ = update(m, key(" "))
+	m, _ = update(m, key("d"))
+	m, command := update(m, key("y"))
+	if command == nil || !strings.Contains(m.View().Content, "Uninstalling model") {
+		t.Fatalf("confirmed uninstall did not start: command=%v view=%s", command, m.View().Content)
+	}
+	m, inventory := update(m, command())
+	if inventory == nil {
+		t.Fatal("successful uninstall did not refresh inventory")
+	}
+	m, _ = update(m, inventory())
+
+	want := localmodels.RemoveRequest{Kind: localmodels.KindMLX, Model: "mlx-community/Qwen3-4B-4bit", BaseURL: "http://localhost:8080/v1"}
+	if len(remover.requests) != 1 || remover.requests[0] != want {
+		t.Fatalf("removal requests=%+v, want %+v", remover.requests, want)
+	}
+	if len(m.workflow.Draft.SelectedModels()) != 0 || len(m.workflow.Draft.Catalog()) != 0 {
+		t.Fatalf("removed model remained selected or visible: selected=%+v view=%s", m.workflow.Draft.SelectedModels(), m.View().Content)
+	}
+	if !strings.Contains(m.View().Content, "Model uninstalled") {
+		t.Fatalf("success was not reported: %s", m.View().Content)
+	}
+}
+
+func TestFailedUninstallKeepsInstalledModelVisible(t *testing.T) {
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "qwen3:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama", BaseURL: "http://127.0.0.1:11434"},
+	}}}
+	m := modelAtModelsScreenWithServices(t, manager, Services{ModelRemove: &fakeModelRemover{err: errors.New("model is busy")}})
+	m, _ = update(m, key("d"))
+	m, command := update(m, key("y"))
+	m, _ = update(m, command())
+	view := m.View().Content
+	if !strings.Contains(view, "qwen3:8b") || !strings.Contains(view, "model is busy") {
+		t.Fatalf("failed uninstall lost model or error: %s", view)
+	}
+}
+
 func TestReviewCannotSaveWhileRequiredDownloadsArePendingOrFailed(t *testing.T) {
 	saves := 0
 	m := NewWithServices(config.Default(), Services{Save: func(config.Config) error {
@@ -203,7 +288,14 @@ func TestReviewCannotSaveWhileRequiredDownloadsArePendingOrFailed(t *testing.T) 
 
 func modelAtModelsScreen(t *testing.T, manager LocalModelManager, searcher ModelSearcher) Model {
 	t.Helper()
-	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelSearch: searcher})
+	return modelAtModelsScreenWithServices(t, manager, Services{ModelSearch: searcher})
+}
+
+func modelAtModelsScreenWithServices(t *testing.T, manager LocalModelManager, services Services) Model {
+	t.Helper()
+	services.Defaults = discovery.DefaultEndpoints()
+	services.LocalModels = manager
+	m := NewWithServices(config.Default(), services)
 	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0]}, {Endpoint: discovery.DefaultEndpoints()[1]}})
 	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
 	m.workflow.Draft.Config.Providers.MLX.Enabled = true

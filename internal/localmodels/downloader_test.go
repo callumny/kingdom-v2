@@ -2,6 +2,7 @@ package localmodels
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,4 +71,64 @@ func TestDownloaderUsesManagedHFCommandAndParsesMLXProgress(t *testing.T) {
 	if len(progress) < 4 || progress[1].Percent != 25 || progress[2].Percent != 75 || progress[len(progress)-1].Percent != 100 {
 		t.Fatalf("progress=%+v", progress)
 	}
+}
+
+func TestDownloaderRemovesOllamaModelThroughLoopbackAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodDelete || request.URL.Path != "/api/delete" {
+			t.Fatalf("request=%s %s", request.Method, request.URL.Path)
+		}
+		body, _ := io.ReadAll(request.Body)
+		if string(body) != `{"model":"qwen3:8b"}`+"\n" {
+			t.Fatalf("body=%s", body)
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	downloader := NewDownloader(nil, server.Client(), "", "")
+	if err := downloader.Remove(context.Background(), RemoveRequest{Kind: KindOllama, Model: "qwen3:8b", BaseURL: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDownloaderRemovesMLXModelThroughManagedHFCache(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	cacheRoot := filepath.Join(t.TempDir(), "hub")
+	hf := filepath.Join(runtimeRoot, "mlx", "bin", "hf")
+	system := &fakeStreamSystem{}
+	downloader := NewDownloader(system, nil, runtimeRoot, cacheRoot)
+
+	if err := downloader.Remove(context.Background(), RemoveRequest{Kind: KindMLX, Model: "mlx-community/Qwen3-4B-4bit"}); err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := []string{"cache", "rm", "model/mlx-community/Qwen3-4B-4bit", "--cache-dir", cacheRoot, "--yes"}
+	if system.call.name != hf || !reflect.DeepEqual(system.call.args, wantArgs) {
+		t.Fatalf("call=%+v want name=%q args=%v", system.call, hf, wantArgs)
+	}
+}
+
+func TestDownloaderRejectsUnsafeModelRemovalRequests(t *testing.T) {
+	downloader := NewDownloader(&fakeStreamSystem{}, nil, "", "")
+	tests := []RemoveRequest{
+		{Kind: KindOllama, Model: "qwen", BaseURL: "https://example.com"},
+		{Kind: KindMLX, Model: "not-a-repository"},
+	}
+	for _, request := range tests {
+		if err := downloader.Remove(context.Background(), request); err == nil {
+			t.Fatalf("unsafe removal accepted: %+v", request)
+		}
+	}
+
+	failed := NewDownloader(&failingStreamSystem{err: errors.New("cache busy")}, nil, "/runtime", "/cache")
+	if err := failed.Remove(context.Background(), RemoveRequest{Kind: KindMLX, Model: "org/model"}); err == nil {
+		t.Fatal("MLX command failure was ignored")
+	}
+}
+
+type failingStreamSystem struct{ err error }
+
+func (s *failingStreamSystem) LookPath(string) (string, error) { return "", nil }
+func (s *failingStreamSystem) Stream(context.Context, string, []string, []string, func(string)) error {
+	return s.err
 }

@@ -90,6 +90,7 @@ func main() {
 		Installer:     providerInstaller,
 		ModelSearch:   modelcatalog.DefaultRemote(nil),
 		ModelDownload: modelDownloader,
+		ModelRemove:   modelDownloader,
 		PrepareWizard: func(ctx context.Context, cfg config.Config, model setup.ModelOption) (setup.ModelOption, error) {
 			return prepareWizardModel(ctx, cfg, model, localModelManager.EnsureOllamaServers, localModelManager.EnsureMLXServers)
 		},

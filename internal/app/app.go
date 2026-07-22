@@ -82,6 +82,13 @@ type Model struct {
 	modelDownloadCh         <-chan modelDownloadEvent
 	modelDownloadGen        uint64
 	modelDownloadCancel     context.CancelFunc
+	modelRemover            ModelRemover
+	modelRemoveConfirming   bool
+	modelRemoveActive       bool
+	modelRemoveTarget       setup.ModelOption
+	modelRemoveNotice       string
+	modelRemoveGen          uint64
+	modelRemoveCancel       context.CancelFunc
 	perfFocus               int
 	prepareWizard           WizardPrepareFunc
 	wizardClient            modelapi.ChatClient
@@ -120,6 +127,7 @@ type Services struct {
 	Installer     ProviderInstaller
 	ModelSearch   ModelSearcher
 	ModelDownload ModelDownloader
+	ModelRemove   ModelRemover
 	PrepareWizard WizardPrepareFunc
 	WizardClient  modelapi.ChatClient
 }
@@ -144,6 +152,10 @@ type ModelSearcher interface {
 
 type ModelDownloader interface {
 	Download(context.Context, localmodels.DownloadRequest, localmodels.DownloadReporter) error
+}
+
+type ModelRemover interface {
+	Remove(context.Context, localmodels.RemoveRequest) error
 }
 
 type providerInstallEvent struct {
@@ -185,6 +197,12 @@ type modelDownloadEventMsg struct {
 	event      modelDownloadEvent
 }
 
+type modelRemoveMsg struct {
+	generation uint64
+	ref        setup.ModelRef
+	err        error
+}
+
 func New(c config.Config) Model {
 	return NewWithServices(c, Services{Defaults: discovery.DefaultEndpoints()})
 }
@@ -211,6 +229,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		installer:       services.Installer,
 		modelSearch:     services.ModelSearch,
 		modelDownloader: services.ModelDownload,
+		modelRemover:    services.ModelRemove,
 		prepareWizard:   services.PrepareWizard,
 		wizardClient:    services.WizardClient,
 		workflow:        w,
@@ -267,6 +286,13 @@ func (m Model) startSetup() Model {
 	m.wizardMessages = nil
 	m.wizardReady, m.wizardBusy, m.wizardApplying, m.wizardPreparing = false, false, false, false
 	m.wizardReturnToReady = false
+	if m.modelRemoveCancel != nil {
+		m.modelRemoveCancel()
+	}
+	m.modelRemoveGen++
+	m.modelRemoveConfirming, m.modelRemoveActive = false, false
+	m.modelRemoveTarget = setup.ModelOption{}
+	m.modelRemoveNotice = ""
 	m.scanning = m.discover != nil
 	return m
 }
@@ -364,6 +390,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.advanceFromModels()
+	case modelRemoveMsg:
+		if !m.modelRemoveActive || x.generation != m.modelRemoveGen || m.screen != setup.StateModels {
+			return m, nil
+		}
+		m.modelRemoveActive = false
+		m.modelRemoveCancel = nil
+		m.modelRemoveTarget = setup.ModelOption{}
+		if x.err != nil {
+			m.workflow.Err = fmt.Errorf("uninstall %s: %w", x.ref.ModelID, x.err)
+			return m, nil
+		}
+		m.workflow.Err = nil
+		m.modelRemoveNotice = "Model uninstalled: " + x.ref.ModelID
+		return m.beginModelInventory()
 	case wizardPreparedMsg:
 		if x.generation != m.wizardGeneration || m.screen != setup.StateWizard {
 			return m, nil
@@ -621,6 +661,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.modelDownloadCancel != nil {
 				m.modelDownloadCancel()
 			}
+			if m.modelRemoveCancel != nil {
+				m.modelRemoveCancel()
+			}
 			if m.running && m.runCancel != nil {
 				m.runCancel()
 				m.running = false
@@ -694,7 +737,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form, cmd = m.form.Update(msg)
 			return m, cmd
 		}
-		if m.setup && m.screen == setup.StateModels && (m.modelSearchActive || m.modelDownloadConfirming) {
+		if m.setup && m.screen == setup.StateModels && (m.modelSearchActive || m.modelDownloadConfirming || m.modelRemoveConfirming || m.modelRemoveActive) {
 			return m.handleModelsKey(key)
 		}
 		if m.setup && m.screen == setup.StateWizard {
@@ -780,6 +823,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.beginDiscovery()
 		}
 		if key == "r" && m.screen == setup.StateModels {
+			m.modelRemoveNotice = ""
 			return m.beginModelInventory()
 		}
 		if key == "a" && m.screen == setup.StateProviders {
@@ -1015,6 +1059,10 @@ func (m Model) presentation() ui.Presentation {
 		ModelDownloadActive:     m.modelDownloadActive,
 		ModelDownloadProgress:   m.modelDownloadProgress,
 		ModelDownloadError:      m.modelDownloadError,
+		ModelRemoveConfirming:   m.modelRemoveConfirming,
+		ModelRemoveActive:       m.modelRemoveActive,
+		ModelRemoveTarget:       m.modelRemoveTarget,
+		ModelRemoveNotice:       m.modelRemoveNotice,
 		Saving:                  m.saving,
 		ProviderConfirming:      m.providerConfirming,
 		ProviderInstalling:      m.providerInstalling,

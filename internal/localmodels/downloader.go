@@ -21,6 +21,12 @@ type DownloadRequest struct {
 	BaseURL string
 }
 
+type RemoveRequest struct {
+	Kind    Kind
+	Model   string
+	BaseURL string
+}
+
 type DownloadProgress struct {
 	Model   string
 	Status  string
@@ -58,6 +64,21 @@ func (d *Downloader) Download(ctx context.Context, request DownloadRequest, repo
 		return d.downloadOllama(ctx, request, report)
 	case KindMLX:
 		return d.downloadMLX(ctx, request, report)
+	default:
+		return fmt.Errorf("unknown model provider %q", request.Kind)
+	}
+}
+
+func (d *Downloader) Remove(ctx context.Context, request RemoveRequest) error {
+	request.Model = strings.TrimSpace(request.Model)
+	if request.Model == "" {
+		return errors.New("model name is required")
+	}
+	switch request.Kind {
+	case KindOllama:
+		return d.removeOllama(ctx, request)
+	case KindMLX:
+		return d.removeMLX(ctx, request)
 	default:
 		return fmt.Errorf("unknown model provider %q", request.Kind)
 	}
@@ -143,7 +164,53 @@ func (d *Downloader) downloadMLX(ctx context.Context, request DownloadRequest, r
 	return nil
 }
 
+func (d *Downloader) removeOllama(ctx context.Context, request RemoveRequest) error {
+	endpoint, err := localOllamaModelURL(request.BaseURL, "/api/delete", "removals")
+	if err != nil {
+		return err
+	}
+	body := strings.NewReader(fmt.Sprintf("{\"model\":%s}\n", mustJSON(request.Model)))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, body)
+	if err != nil {
+		return fmt.Errorf("create Ollama removal request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	client := *d.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(httpRequest)
+	if err != nil {
+		return fmt.Errorf("remove Ollama model: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("remove Ollama model: HTTP %d", response.StatusCode)
+	}
+	return nil
+}
+
+func (d *Downloader) removeMLX(ctx context.Context, request RemoveRequest) error {
+	if d.system == nil {
+		return errors.New("MLX cache manager is unavailable")
+	}
+	if !validRepositoryID(request.Model) {
+		return fmt.Errorf("invalid MLX repository %q", request.Model)
+	}
+	if d.runtimeRoot == "." || d.cacheRoot == "." {
+		return errors.New("MLX cache directory is unavailable")
+	}
+	hf := filepath.Join(d.runtimeRoot, "mlx", "bin", "hf")
+	args := []string{"cache", "rm", "model/" + request.Model, "--cache-dir", d.cacheRoot, "--yes"}
+	if err := d.system.Stream(ctx, hf, args, []string{"HF_HUB_CACHE=" + d.cacheRoot}, func(string) {}); err != nil {
+		return fmt.Errorf("remove MLX model: %w", err)
+	}
+	return nil
+}
+
 func localOllamaPullURL(base string) (string, error) {
+	return localOllamaModelURL(base, "/api/pull", "downloads")
+}
+
+func localOllamaModelURL(base, path, operation string) (string, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(base), "/"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", errors.New("invalid Ollama endpoint")
@@ -151,9 +218,9 @@ func localOllamaPullURL(base string) (string, error) {
 	host := parsed.Hostname()
 	address := net.ParseIP(host)
 	if host != "localhost" && (address == nil || !address.IsLoopback()) {
-		return "", errors.New("Ollama downloads require a loopback endpoint")
+		return "", fmt.Errorf("Ollama %s require a loopback endpoint", operation)
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/pull"
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + path
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil

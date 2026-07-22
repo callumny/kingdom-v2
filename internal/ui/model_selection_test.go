@@ -45,6 +45,22 @@ func TestModelsViewCombinesProvidersAndShowsSelectionLimit(t *testing.T) {
 	assertViewFits(t, view, 100, 32)
 }
 
+func TestModelsViewAdvertisesUninstallWithoutClippingNavigation(t *testing.T) {
+	draft := setup.NewDraft(config.Default(), nil)
+	draft.ReplaceCatalog([]setup.ModelOption{{
+		Ref:       setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "qwen3:8b"},
+		Endpoint:  topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+		Installed: true,
+	}})
+	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
+	view := ViewWithPresentation(80, 30, true, w, Presentation{}).Content
+	for _, want := range []string{"d Uninstall", "Enter Continue", "Esc Back"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("models footer missing %q: %s", want, view)
+		}
+	}
+}
+
 func TestModelsViewGivesSearchResultsTheirOwnHierarchy(t *testing.T) {
 	draft := setup.NewDraft(config.Default(), nil)
 	draft.ReplaceCatalog([]setup.ModelOption{

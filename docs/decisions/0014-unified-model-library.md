@@ -13,13 +13,20 @@ pieces of state:
 - installed matches sort before online matches and each provider has its own remote result limit;
 - a model's identity is its endpoint ID plus model ID;
 - selected identities survive search-query and result changes; and
-- online models require a separate confirmation before any download begins.
+- online models require a separate confirmation before any download begins; and
+- installed models require a separate confirmation before provider-specific removal.
 
 Provider-specific behavior stays behind injected interfaces. Ollama downloads through its configured
 loopback `/api/pull` endpoint. MLX downloads through the `hf` executable in Kingdom's managed Python
 environment into Kingdom's Hugging Face cache. Both emit the same typed progress value to the
 application. Downloads remain on Models and must complete before the Wizard opens. A failed
 download is visible and blocks progression.
+
+The same Models screen owns uninstalling. `d` acts only on an installed row and opens a confirmation
+before any files are removed. Ollama removal uses its configured loopback `/api/delete` endpoint. MLX
+removal uses the exact `model/<repository>` cache ID with Kingdom's managed `hf cache rm` command.
+Success triggers a fresh inventory scan and reconciles the transient selection; failure preserves the
+visible model and reports the provider error.
 
 Setup has one path: Providers → Models → Wizard → Ready. The old `m` and setup-time `Ctrl+R` detour is
 removed. `Ctrl+R` remains available from the idle chat screen as a maintenance view for installed
@@ -42,7 +49,7 @@ state.
 
 Tests were written before each behavior. They cover combined installed inventory, mixed-provider fuzzy
 search, installed-first ordering, stale-search rejection, preserved selection, explicit confirmation,
-provider-specific download requests, progress, cancellation, success/failure readiness gates, removal
-of legacy setup shortcuts, and the bounded cursor-following model list. `make check` exercises formatting,
-vetting, the full unit/integration suite, and the production build; race tests cover the application,
-setup, and UI packages.
+provider-specific download and removal requests, progress, cancellation, success/failure readiness
+gates, removal confirmation and selection reconciliation, removal of legacy setup shortcuts, and the
+bounded cursor-following model list. `make check` exercises formatting, vetting, the full unit/integration
+suite, and the production build; race tests cover the application, setup, and UI packages.

@@ -23,6 +23,9 @@ type Presentation struct {
 	ModelDownloadConfirming                                  bool
 	ModelDownloadActive                                      bool
 	ModelDownloadError                                       string
+	ModelRemoveConfirming, ModelRemoveActive                 bool
+	ModelRemoveTarget                                        setup.ModelOption
+	ModelRemoveNotice                                        string
 	WizardBusy, WizardReady, WizardApplying, WizardPreparing bool
 	WizardWarming                                            bool
 	ManualSetup                                              bool

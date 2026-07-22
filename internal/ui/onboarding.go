@@ -83,6 +83,19 @@ func providerProgressBar(completed, total int) string {
 
 func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	selected := wf.Draft.SelectedModels()
+	if p.ModelRemoveConfirming {
+		return modelRemoveConfirmation(wf, p.ModelRemoveTarget)
+	}
+	if p.ModelRemoveActive {
+		provider := modelProviderLabel(p.ModelRemoveTarget)
+		body := []string{
+			royalBrand.Render("Uninstalling model"),
+			"",
+			royalCyan.Render(provider + " · " + p.ModelRemoveTarget.Ref.ModelID),
+			royalMuted.Render("Removing downloaded files…"),
+		}
+		return body, royalMuted.Render("Please wait…")
+	}
 	if p.ModelDownloadConfirming {
 		return modelDownloadConfirmation(wf)
 	}
@@ -127,6 +140,9 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		body = append(body, royalGold.Render(p.ModelSearchWarning))
 	}
 	body = append(body, "", royalCyan.Render(fmt.Sprintf("%d of %d selected", len(selected), setup.MaxSelectedModels)), "")
+	if p.ModelRemoveNotice != "" {
+		body = append(body, royalGreen.Render(p.ModelRemoveNotice), "")
+	}
 	catalog := wf.Draft.Catalog()
 	if len(selected) == setup.MaxSelectedModels {
 		body = append(body, selectionSummary(selected)...)
@@ -158,7 +174,7 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if wf.Err != nil {
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
-	footer := "/ Search   •   ↑↓ Move   •   Space Select   •   Enter Continue   •   Esc Back"
+	footer := "/ Search  •  Space Select  •  d Uninstall  •  Enter Continue  •  Esc Back"
 	if p.ModelSearchActive {
 		footer = "Type to filter   •   ↑↓ Move   •   Space Select   •   Enter Finish search   •   Esc Clear"
 	}
@@ -166,6 +182,37 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		footer = "Refreshing models…   •   Esc Back"
 	}
 	return body, royalMuted.Render(footer)
+}
+
+func modelRemoveConfirmation(wf *setup.Workflow, option setup.ModelOption) ([]string, string) {
+	provider := modelProviderLabel(option)
+	body := []string{
+		royalBrand.Render("Uninstall " + provider + " model?"),
+		"",
+		modelOptionRow(option, false, wf.Draft.IsModelSelected(option.Ref)),
+		"",
+	}
+	body = append(body, styledParagraph("This permanently removes the downloaded model files from this machine.", 88, royalMuted)...)
+	if wf.Draft.IsModelSelected(option.Ref) {
+		body = append(body, royalGold.Render("It will also be removed from your current selection."))
+	}
+	body = append(body, royalMuted.Render("If it was assigned previously, choose a replacement before leaving setup."))
+	body = append(body, royalMuted.Render("A running model may remain in memory until its provider process stops."))
+	return body, royalMuted.Render("Enter / y Uninstall   •   Esc / n Cancel")
+}
+
+func modelProviderLabel(option setup.ModelOption) string {
+	if option.Endpoint.Name != "" {
+		return option.Endpoint.Name
+	}
+	switch option.Ref.EndpointID {
+	case setup.OllamaEndpointID:
+		return "Ollama"
+	case setup.MLXEndpointID:
+		return "MLX"
+	default:
+		return option.Ref.EndpointID
+	}
 }
 
 func modelDownloadConfirmation(wf *setup.Workflow) ([]string, string) {

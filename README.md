@@ -18,8 +18,9 @@ locked until every enabled provider is ready.
 
 Models combines installed Ollama and MLX models in aligned Provider, Status, and Model columns. Press
 `/` for one fuzzy search across every enabled provider; installed matches rank first and missing models
-are marked Download. Select up to three. Downloads require confirmation and finish on the Models page
-before setup continues.
+are marked Download. Select up to three. Highlight an installed model and press `d` to uninstall it
+after an explicit confirmation; Kingdom removes it from the current selection and refreshes the combined
+inventory. Downloads require confirmation and finish on the Models page before setup continues.
 
 Kingdom opens the Wizard immediately and uses the smallest selected model as the likely fastest setup
 model. It starts that model on its final planned endpoint, then prepares the complete proposed runtime
