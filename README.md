@@ -29,10 +29,16 @@ change in plain language or press Enter to Apply & launch immediately, even if t
 is still starting.
 
 The Wizard can only call small setup tools: inspect or preview the draft, assign a numbered selected
-model to a role, enable Council, set Council size, set Worker concurrency, choose shared or separate
-Ollama servers, set provider base ports, and apply after explicit user confirmation. It cannot access
-the shell, files, memory, provider installation, or Kingdom's normal workspace tools. Configuration is
-validated and atomically saved only by Apply & launch.
+model to a role, swap two role models, enable Council, set Council size, set concurrent workers, choose
+shared or separate Ollama servers, set provider base ports, and apply after explicit user confirmation.
+It requests JSON output from the provider, while Kingdom reports successful changes from the resulting
+Go configuration rather than trusting model-written claims. It cannot access the shell, files, memory,
+provider installation, or Kingdom's normal workspace tools. Configuration is validated and atomically
+saved only by Apply & launch.
+
+Press `Tab` from the Wizard for a model-free Manual setup path. Assign selected models directly, press
+`x` to swap King and Worker, adjust Council members and concurrent workers, review the complete proposal,
+and save it through the same validation boundary.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
