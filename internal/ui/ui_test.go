@@ -53,6 +53,46 @@ func TestProviderViewHasProgressStatusAndContextualHelp(t *testing.T) {
 	assertViewFits(t, view, 100, 32)
 }
 
+func TestModelRowsUseAlignedProviderStatusAndNameColumns(t *testing.T) {
+	cfg := config.Default()
+	w := &setup.Workflow{State: setup.StateModels, Draft: setup.NewDraft(cfg, nil)}
+	w.Draft.ReplaceCatalog([]setup.ModelOption{
+		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "qwen3:14b"}, Endpoint: topology.Endpoint{Name: "Ollama"}, Installed: true},
+		{Ref: setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: "mlx-community/Qwen3-8B-4bit"}, Endpoint: topology.Endpoint{Name: "MLX"}, Installed: false},
+	})
+	view := ansi.Strip(ViewWithPresentation(100, 40, true, w, Presentation{}).Content)
+	if !strings.Contains(view, "Provider") || !strings.Contains(view, "Status") || !strings.Contains(view, "Model") {
+		t.Fatalf("missing model table header: %s", view)
+	}
+	lines := strings.Split(view, "\n")
+	var first, second string
+	for _, line := range lines {
+		if strings.Contains(line, "qwen3:14b") {
+			first = line
+		}
+		if strings.Contains(line, "mlx-community/Qwen3-8B-4bit") {
+			second = line
+		}
+	}
+	if first == "" || second == "" {
+		t.Fatalf("model rows missing: %s", view)
+	}
+	for _, column := range []struct {
+		first  string
+		second string
+	}{
+		{"Ollama", "MLX"},
+		{"Installed", "Download"},
+		{"qwen3:14b", "mlx-community/Qwen3-8B-4bit"},
+	} {
+		firstIndex := strings.Index(first, column.first)
+		secondIndex := strings.Index(second, column.second)
+		if ansi.StringWidth(first[:firstIndex]) != ansi.StringWidth(second[:secondIndex]) {
+			t.Fatalf("column %q/%q is not aligned:\n%s\n%s", column.first, column.second, first, second)
+		}
+	}
+}
+
 func assertViewFits(t *testing.T, view string, width, height int) {
 	t.Helper()
 	lines := strings.Split(view, "\n")

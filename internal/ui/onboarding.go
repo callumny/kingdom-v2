@@ -120,6 +120,7 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	} else {
 		body = append(body, installedResultsSummary(catalog))
 	}
+	body = append(body, modelTableHeader())
 	start, end := modelWindow(len(catalog), p.ModelCursor)
 	for offset, option := range catalog[start:end] {
 		index := start + offset
@@ -225,15 +226,20 @@ func modelOptionRow(option setup.ModelOption, focused, selected bool) string {
 	if selected {
 		checked = "[✓]"
 	}
-	state := royalPending.Render("Download")
+	state := royalGold.Render(fmt.Sprintf("%-11s", "Download"))
 	if option.Installed {
-		state = royalReady.Render("Installed")
+		state = royalGreen.Render(fmt.Sprintf("%-11s", "Installed"))
 	}
 	provider := option.Endpoint.Name
 	if provider == "" {
 		provider = option.Ref.EndpointID
 	}
-	return pointer + border + " " + royalText.Render(checked) + " " + royalBadge.Render(provider) + " " + state + " " + royalText.Render(option.Ref.ModelID) + "  " + royalMuted.Render(modelMetadata(option))
+	providerColumn := royalCyan.Render(fmt.Sprintf("%-10s", provider))
+	return pointer + border + " " + royalText.Render(checked) + " " + providerColumn + " " + state + " " + royalText.Render(option.Ref.ModelID) + "  " + royalMuted.Render(modelMetadata(option))
+}
+
+func modelTableHeader() string {
+	return "        " + royalMuted.Render(fmt.Sprintf("%-10s %-11s %s", "Provider", "Status", "Model"))
 }
 
 func providerCount(catalog []setup.ModelOption) int {
