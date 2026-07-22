@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/callumny/kingdom/internal/discovery"
@@ -67,7 +68,11 @@ type provider interface {
 	kind() Kind
 }
 
-type Manager struct{ providers []provider }
+type Manager struct {
+	providers  []provider
+	mlxMu      sync.Mutex
+	mlxServers map[string]topology.Endpoint
+}
 
 func New(system System, discoverer Discoverer, mlxCacheRoot string) *Manager {
 	return NewWithRuntimeRoot(system, discoverer, mlxCacheRoot, "")
@@ -86,7 +91,7 @@ func NewWithRuntimeRoot(system System, discoverer Discoverer, mlxCacheRoot, runt
 	return &Manager{providers: []provider{
 		&ollamaProvider{system: system, discoverer: discoverer, endpoint: byID["ollama-local"]},
 		&mlxProvider{system: system, discoverer: discoverer, endpoint: byID["mlx-local"], cacheRoot: mlxCacheRoot, executable: mlxExecutable},
-	}}
+	}, mlxServers: make(map[string]topology.Endpoint)}
 }
 
 func (m *Manager) Inspect(ctx context.Context) []Runtime {
@@ -214,6 +219,8 @@ func (m *Manager) EnsureMLXServers(ctx context.Context, servers []ModelServer) e
 	if base == nil {
 		return errors.New("MLX provider is unavailable")
 	}
+	m.mlxMu.Lock()
+	defer m.mlxMu.Unlock()
 
 	waitContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -231,6 +238,14 @@ func (m *Manager) EnsureMLXServers(ctx context.Context, servers []ModelServer) e
 			return fmt.Errorf("MLX endpoint %s is assigned to both %q and %q", address, existing, modelID)
 		}
 		byAddress[address] = modelID
+	}
+	for index := range servers {
+		server := &servers[index]
+		modelID := strings.TrimSpace(server.Model)
+		if known, ok := m.mlxServers[modelID]; ok {
+			server.Endpoint = known
+		}
+		address, _, _ := validateMLXServerEndpoint(server.Endpoint)
 		if err := waitContext.Err(); err != nil {
 			return err
 		}
@@ -244,9 +259,18 @@ func (m *Manager) EnsureMLXServers(ctx context.Context, servers []ModelServer) e
 				}
 			}
 			if servingSelectedModel {
+				m.mlxServers[modelID] = server.Endpoint
 				continue
 			}
-			return fmt.Errorf("MLX endpoint %s is already serving a different model", address)
+		}
+		if running || !loopbackPortAvailable(address) {
+			endpoint, replacementAddress, err := nextAvailableMLXEndpoint(server.Endpoint, byAddress)
+			if err != nil {
+				return fmt.Errorf("allocate MLX model %q after port conflict on %s: %w", modelID, address, err)
+			}
+			server.Endpoint = endpoint
+			address = replacementAddress
+			byAddress[address] = modelID
 		}
 		target := *base
 		target.endpoint = server.Endpoint
@@ -256,8 +280,39 @@ func (m *Manager) EnsureMLXServers(ctx context.Context, servers []ModelServer) e
 		if err := waitForProvider(waitContext, &target, KindMLX, modelID); err != nil {
 			return fmt.Errorf("MLX model %q on %s: %w", modelID, address, err)
 		}
+		m.mlxServers[modelID] = server.Endpoint
 	}
 	return nil
+}
+
+func loopbackPortAvailable(address string) bool {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
+}
+
+func nextAvailableMLXEndpoint(endpoint topology.Endpoint, reserved map[string]string) (topology.Endpoint, string, error) {
+	parsed, err := url.Parse(endpoint.BaseURL)
+	if err != nil {
+		return topology.Endpoint{}, "", err
+	}
+	start, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		return topology.Endpoint{}, "", err
+	}
+	for port := start + 1; port <= 65535; port++ {
+		address := net.JoinHostPort(parsed.Hostname(), strconv.Itoa(port))
+		if reserved[address] != "" || !loopbackPortAvailable(address) {
+			continue
+		}
+		parsed.Host = address
+		endpoint.BaseURL = parsed.String()
+		return endpoint, address, nil
+	}
+	return topology.Endpoint{}, "", errors.New("no free loopback port is available")
 }
 
 func validateOllamaServerEndpoint(endpoint topology.Endpoint) (string, error) {

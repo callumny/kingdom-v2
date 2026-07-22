@@ -3,10 +3,14 @@ package localmodels
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +216,56 @@ func TestEnsureMLXServersStartsEachModelOnItsAssignedPort(t *testing.T) {
 	}
 	if !reflect.DeepEqual(system.started, want) {
 		t.Fatalf("started=%+v want=%+v", system.started, want)
+	}
+}
+
+func TestEnsureMLXServersMovesAnOccupiedPortAndReturnsTheRuntimeEndpoint(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	occupiedPort := listener.Addr().(*net.TCPAddr).Port
+	if occupiedPort == 65535 {
+		t.Skip("cannot allocate a following port")
+	}
+
+	cache := createCachedMLXModel(t, "mlx-community", "small")
+	discoverer := &mlxEndpointReadiness{loaded: make(map[string]string)}
+	system := &fakeSystem{paths: map[string]string{"mlx_lm.server": "/tools/mlx_lm.server"}}
+	system.startHook = discoverer.markStarted
+	manager := New(system, discoverer, cache)
+	servers := []ModelServer{{
+		Model: "mlx-community/small",
+		Endpoint: topology.Endpoint{
+			ID:      "small",
+			Kind:    topology.KindOpenAICompatible,
+			BaseURL: fmt.Sprintf("http://127.0.0.1:%d/v1", occupiedPort),
+		},
+	}}
+
+	if err := manager.EnsureMLXServers(context.Background(), servers); err != nil {
+		t.Fatal(err)
+	}
+	if servers[0].Endpoint.BaseURL == fmt.Sprintf("http://127.0.0.1:%d/v1", occupiedPort) {
+		t.Fatalf("occupied endpoint was not replaced: %+v", servers[0].Endpoint)
+	}
+	if len(system.started) != 1 || slices.Contains(system.started[0].args, strconv.Itoa(occupiedPort)) {
+		t.Fatalf("started on occupied port: %+v", system.started)
+	}
+	second := []ModelServer{{
+		Model: "mlx-community/small",
+		Endpoint: topology.Endpoint{
+			ID:      "small",
+			Kind:    topology.KindOpenAICompatible,
+			BaseURL: fmt.Sprintf("http://127.0.0.1:%d/v1", occupiedPort),
+		},
+	}}
+	if err := manager.EnsureMLXServers(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	if len(system.started) != 1 || second[0].Endpoint != servers[0].Endpoint {
+		t.Fatalf("resolved server was not reused: starts=%+v first=%+v second=%+v", system.started, servers, second)
 	}
 }
 

@@ -86,6 +86,32 @@ func TestPrepareRuntimeConfigStartsDedicatedMLXModels(t *testing.T) {
 	}
 }
 
+func TestPrepareRuntimeConfigUsesResolvedMLXEndpoint(t *testing.T) {
+	cfg := managedRuntimeConfig(config.OllamaSharedPort)
+	cfg.Providers.MLX.Enabled = true
+	cfg.Providers.MLX.Port = 13000
+	cfg.Topology.Endpoints = append(cfg.Topology.Endpoints, topology.Endpoint{ID: setup.MLXEndpointID, Name: "MLX", Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:13000/v1"})
+	cfg.Topology.Roles.King = topology.Assignment{EndpointID: setup.MLXEndpointID, Model: "large-mlx"}
+
+	runtimeConfig, err := prepareRuntimeConfig(context.Background(), cfg, func(context.Context, []topology.Endpoint) error { return nil }, func(_ context.Context, servers []localmodels.ModelServer) error {
+		servers[0].Endpoint.BaseURL = "http://127.0.0.1:13007/v1"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment := runtimeConfig.Topology.Roles.King
+	for _, endpoint := range runtimeConfig.Topology.Endpoints {
+		if endpoint.ID == assignment.EndpointID {
+			if endpoint.BaseURL != "http://127.0.0.1:13007/v1" {
+				t.Fatalf("runtime endpoint=%+v", endpoint)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing runtime endpoint for %+v", assignment)
+}
+
 func TestWarmRuntimeConfigPreloadsEveryRoutedOllamaModel(t *testing.T) {
 	cfg := managedRuntimeConfig(config.OllamaDedicatedPorts)
 	var preloaded []string

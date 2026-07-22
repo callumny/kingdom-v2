@@ -141,8 +141,21 @@ func prepareRuntimeConfig(
 		if err := ensureMLX(ctx, servers); err != nil {
 			return config.Config{}, fmt.Errorf("prepare MLX servers: %w", err)
 		}
+		applyResolvedMLXEndpoints(&plan.Config, servers)
 	}
 	return plan.Config, nil
+}
+
+func applyResolvedMLXEndpoints(runtimeConfig *config.Config, servers []localmodels.ModelServer) {
+	resolved := make(map[string]topology.Endpoint, len(servers))
+	for _, server := range servers {
+		resolved[server.Endpoint.ID] = server.Endpoint
+	}
+	for index, endpoint := range runtimeConfig.Topology.Endpoints {
+		if replacement, ok := resolved[endpoint.ID]; ok {
+			runtimeConfig.Topology.Endpoints[index] = replacement
+		}
+	}
 }
 
 func warmRuntimeConfig(
@@ -217,9 +230,11 @@ func prepareWizardModel(
 		if ensureMLX == nil {
 			return model, fmt.Errorf("MLX runtime manager is unavailable")
 		}
-		if err := ensureMLX(ctx, []localmodels.ModelServer{{Model: model.Ref.ModelID, Endpoint: model.Endpoint}}); err != nil {
+		servers := []localmodels.ModelServer{{Model: model.Ref.ModelID, Endpoint: model.Endpoint}}
+		if err := ensureMLX(ctx, servers); err != nil {
 			return model, err
 		}
+		model.Endpoint = servers[0].Endpoint
 		return model, nil
 	default:
 		return model, fmt.Errorf("unsupported Wizard provider %q", model.Ref.EndpointID)
