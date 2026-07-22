@@ -23,8 +23,8 @@ before setup continues.
 
 Kingdom opens the Wizard immediately and uses the smallest selected model as the likely fastest setup
 model. It starts that model on its final planned endpoint, then prepares the complete proposed runtime
-in the background while setup remains interactive. For an Ollama King, Kingdom also preloads the model
-without generating text; an MLX model loads as its server starts. The Wizard first applies deterministic
+in the background while setup remains interactive. Kingdom preloads every active Ollama model without
+generating text; MLX models load as their servers start. The Wizard first applies deterministic
 defaults: larger for King, smaller for Worker, Council disabled unless three models were selected, and
 conservative concurrency. Ask for a specific change in plain language or press Enter to Apply & launch
 immediately. The first prompt waits for and reuses any matching background preparation instead of

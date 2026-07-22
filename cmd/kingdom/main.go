@@ -155,23 +155,19 @@ func warmRuntimeConfig(
 	if err != nil {
 		return config.Config{}, err
 	}
-	king := runtimeConfig.Topology.Roles.King
-	for _, endpoint := range runtimeConfig.Topology.Endpoints {
-		if endpoint.ID != king.EndpointID {
-			continue
-		}
-		if endpoint.Kind != topology.KindOllama {
-			return runtimeConfig, nil
-		}
-		if preloadOllama == nil {
-			return config.Config{}, fmt.Errorf("preload Ollama King: model client is unavailable")
-		}
-		if err := preloadOllama(ctx, endpoint, king.Model); err != nil {
-			return config.Config{}, fmt.Errorf("preload Ollama King: %w", err)
-		}
-		return runtimeConfig, nil
+	plan, err := config.BuildRuntimePlan(persisted)
+	if err != nil {
+		return config.Config{}, fmt.Errorf("plan warm-up: %w", err)
 	}
-	return config.Config{}, fmt.Errorf("prepare King: runtime endpoint %q is unavailable", king.EndpointID)
+	if len(plan.OllamaRoutes) > 0 && preloadOllama == nil {
+		return config.Config{}, fmt.Errorf("preload Ollama models: model client is unavailable")
+	}
+	for _, route := range plan.OllamaRoutes {
+		if err := preloadOllama(ctx, route.Endpoint, route.Model); err != nil {
+			return config.Config{}, fmt.Errorf("preload Ollama model %q: %w", route.Model, err)
+		}
+	}
+	return runtimeConfig, nil
 }
 
 func prepareWizardModel(

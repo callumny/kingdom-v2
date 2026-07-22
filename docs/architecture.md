@@ -134,8 +134,8 @@ the Wizard opens. The setup draft marks a model installed only after its provide
 
 The Wizard opens synchronously with deterministic defaults and selects the suggested Worker—the
 smallest selected model—as the likely fastest conversational model. It prepares that model on its final
-runtime endpoint and then warms the full proposed topology in the background. Ollama receives an empty
-generation request for the proposed King, while MLX loads each model as its server starts. No model
+runtime endpoint and then warms the full proposed topology in the background. Every unique active Ollama
+model receives an empty generation request, while MLX loads each model as its server starts. No model
 inference runs during entry, so the user can inspect or apply the proposal immediately. A signature of
 runtime-relevant settings prevents stale warm state from being reused after a Wizard or manual change.
 The first prompt consumes a matching prepared configuration and otherwise falls back to normal runtime

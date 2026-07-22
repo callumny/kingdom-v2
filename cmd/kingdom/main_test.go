@@ -86,45 +86,47 @@ func TestPrepareRuntimeConfigStartsDedicatedMLXModels(t *testing.T) {
 	}
 }
 
-func TestWarmRuntimeConfigPreloadsTheRoutedOllamaKing(t *testing.T) {
+func TestWarmRuntimeConfigPreloadsEveryRoutedOllamaModel(t *testing.T) {
 	cfg := managedRuntimeConfig(config.OllamaDedicatedPorts)
-	var endpoint topology.Endpoint
-	var model string
+	var preloaded []string
 	runtimeConfig, err := warmRuntimeConfig(
 		context.Background(),
 		cfg,
 		func(context.Context, []topology.Endpoint) error { return nil },
 		nil,
 		func(_ context.Context, next topology.Endpoint, nextModel string) error {
-			endpoint = next
-			model = nextModel
+			preloaded = append(preloaded, next.BaseURL+" "+nextModel)
 			return nil
 		},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "large" || endpoint.ID != runtimeConfig.Topology.Roles.King.EndpointID || endpoint.BaseURL != "http://127.0.0.1:12000" {
-		t.Fatalf("preloaded endpoint=%+v model=%q roles=%+v", endpoint, model, runtimeConfig.Topology.Roles)
+	want := []string{"http://127.0.0.1:12000 large", "http://127.0.0.1:12001 small"}
+	if !reflect.DeepEqual(preloaded, want) || runtimeConfig.Topology.Roles.King.EndpointID == setup.OllamaEndpointID {
+		t.Fatalf("preloaded=%v roles=%+v", preloaded, runtimeConfig.Topology.Roles)
 	}
 }
 
-func TestWarmRuntimeConfigDoesNotPreloadAnMLXKingTwice(t *testing.T) {
+func TestWarmRuntimeConfigPreloadsOnlyOllamaRoutesInMixedTopology(t *testing.T) {
 	cfg := managedRuntimeConfig(config.OllamaSharedPort)
 	cfg.Providers.MLX.Enabled = true
 	cfg.Providers.MLX.Port = 13000
 	cfg.Topology.Endpoints = append(cfg.Topology.Endpoints, topology.Endpoint{ID: setup.MLXEndpointID, Name: "MLX", Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:13000/v1"})
 	cfg.Topology.Roles.King = topology.Assignment{EndpointID: setup.MLXEndpointID, Model: "large-mlx"}
-	preloads := 0
+	var preloaded []string
 	_, err := warmRuntimeConfig(
 		context.Background(),
 		cfg,
 		func(context.Context, []topology.Endpoint) error { return nil },
 		func(context.Context, []localmodels.ModelServer) error { return nil },
-		func(context.Context, topology.Endpoint, string) error { preloads++; return nil },
+		func(_ context.Context, _ topology.Endpoint, model string) error {
+			preloaded = append(preloaded, model)
+			return nil
+		},
 	)
-	if err != nil || preloads != 0 {
-		t.Fatalf("err=%v preloads=%d", err, preloads)
+	if err != nil || !reflect.DeepEqual(preloaded, []string{"small", "large"}) {
+		t.Fatalf("err=%v preloaded=%v", err, preloaded)
 	}
 }
 

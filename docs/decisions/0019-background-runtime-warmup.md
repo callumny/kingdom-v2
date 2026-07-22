@@ -6,8 +6,8 @@ Status: accepted
 
 After the setup model starts, prepare the complete proposed runtime topology in the background. Start
 the setup model on its final planned endpoint so MLX is not loaded twice and dedicated Ollama does not
-start a redundant server. If the proposed King uses Ollama, send an empty generation request with a
-ten-minute keep-alive hint. MLX needs no separate preload because starting its model-scoped server loads
+start a redundant server. Send an empty generation request with a ten-minute keep-alive hint for every
+unique active Ollama model. MLX needs no separate preload because starting its model-scoped server loads
 the model.
 
 Store the ephemeral runtime configuration behind a signature containing only settings that affect a
@@ -29,7 +29,7 @@ endpoints.
 
 Applying setup remains immediate, but a prompt submitted before warm-up completes waits on the same work
 instead of launching duplicate processes. Large models can still have unavoidable load and inference
-latency. Ollama Kings are kept resident for ten minutes after preload; provider memory policy remains
+latency. Active Ollama models are kept resident for ten minutes after preload; provider memory policy remains
 external to Kingdom.
 
 ## Verification
