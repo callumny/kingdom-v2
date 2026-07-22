@@ -22,11 +22,13 @@ are marked Download. Select up to three. Downloads require confirmation and fini
 before setup continues.
 
 Kingdom opens the Wizard immediately and uses the smallest selected model as the likely fastest setup
-model. Only that runtime is prepared, in the background; setup never waits for benchmark calls across
-every selection. The Wizard first applies deterministic defaults: larger for King, smaller for Worker,
-Council disabled unless three models were selected, and conservative concurrency. Ask for a specific
-change in plain language or press Enter to Apply & launch immediately, even if the conversational model
-is still starting.
+model. It starts that model on its final planned endpoint, then prepares the complete proposed runtime
+in the background while setup remains interactive. For an Ollama King, Kingdom also preloads the model
+without generating text; an MLX model loads as its server starts. The Wizard first applies deterministic
+defaults: larger for King, smaller for Worker, Council disabled unless three models were selected, and
+conservative concurrency. Ask for a specific change in plain language or press Enter to Apply & launch
+immediately. The first prompt waits for and reuses any matching background preparation instead of
+starting the topology again.
 
 The Wizard can only call small setup tools: inspect or preview the draft, assign an exact selected model
 to a role, swap two role models, enable Council, set Council size, set concurrent workers, choose
@@ -51,6 +53,9 @@ In separate Ollama mode, each unique active Ollama model is routed to its own co
 shared mode uses one base port. Each unique active MLX model always receives its own consecutive
 loopback port. Roles sharing a model share its server. Kingdom reuses healthy servers and starts missing
 ones. Generated runtime endpoints are never written to the configuration file.
+During setup, the same preparation runs speculatively against the proposed configuration. A Wizard or
+manual change cancels stale work and prepares the new proposal; failures remain non-blocking and are
+retried by the first prompt.
 
 Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Before each run, the King receives
 up to six recent exchanges as clearly labelled, untrusted historical context. Press `Ctrl+M` while

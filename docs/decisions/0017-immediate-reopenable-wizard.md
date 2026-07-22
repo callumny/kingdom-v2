@@ -2,6 +2,8 @@
 
 Status: accepted
 
+Runtime preparation is superseded in part by ADR 0019; immediate entry and `/wizard` remain unchanged.
+
 ## Decision
 
 Remove the selected-model benchmark from onboarding. After downloads finish, Kingdom applies its

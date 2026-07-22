@@ -133,15 +133,18 @@ CLI and private cache. Downloads report typed progress events, remain on Models,
 the Wizard opens. The setup draft marks a model installed only after its provider adapter reports success.
 
 The Wizard opens synchronously with deterministic defaults and selects the suggested Worker—the
-smallest selected model—as the likely fastest conversational model. Only that runtime is prepared in
-the background. No model inference runs during entry, so the user can inspect or apply the proposal
-immediately. If runtime preparation fails, the deterministic proposal remains applicable and the TUI
-reports that only conversation is unavailable.
+smallest selected model—as the likely fastest conversational model. It prepares that model on its final
+runtime endpoint and then warms the full proposed topology in the background. Ollama receives an empty
+generation request for the proposed King, while MLX loads each model as its server starts. No model
+inference runs during entry, so the user can inspect or apply the proposal immediately. A signature of
+runtime-relevant settings prevents stale warm state from being reused after a Wizard or manual change.
+The first prompt consumes a matching prepared configuration and otherwise falls back to normal runtime
+preparation.
 
 `internal/wizard` is intentionally not a general agent framework. It applies deterministic size-based
 defaults before the conversation and accepts exactly one JSON message or tool action per model turn.
 Its fixed tools change one setup concern at a time: roles, Council, concurrency, provider ports, and
-Ollama server mode. Model arguments use the visible numbers 1–3 rather than long provider IDs. Tools
+Ollama server mode. Role assignment accepts an exact selected model name and an optional provider. Tools
 hold no shell, filesystem, memory, installer, or normal orchestration capability. Apply authorization
 is single-use and is granted only by the user's Enter action; successful validation and atomic save
 move the app to Ready.
