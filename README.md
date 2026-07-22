@@ -21,11 +21,12 @@ Models combines installed Ollama and MLX models in aligned Provider, Status, and
 are marked Download. Select up to three. Downloads require confirmation and finish on the Models page
 before setup continues.
 
-Kingdom then performs one warm-up and one short capability test per selected model. The fastest model
-that can reliably produce the Wizard's strict control action becomes the local setup Wizard. The
-benchmark is session-only and never leaves the machine. The Wizard first applies deterministic defaults:
-larger for King, smaller for Worker, Council disabled unless three models were selected, and conservative
-concurrency. Ask for a specific change in plain language or press Enter to Apply & launch.
+Kingdom opens the Wizard immediately and uses the smallest selected model as the likely fastest setup
+model. Only that runtime is prepared, in the background; setup never waits for benchmark calls across
+every selection. The Wizard first applies deterministic defaults: larger for King, smaller for Worker,
+Council disabled unless three models were selected, and conservative concurrency. Ask for a specific
+change in plain language or press Enter to Apply & launch immediately, even if the conversational model
+is still starting.
 
 The Wizard can only call small setup tools: inspect or preview the draft, assign a numbered selected
 model to a role, enable Council, set Council size, set Worker concurrency, choose shared or separate
@@ -35,7 +36,8 @@ validated and atomically saved only by Apply & launch.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
-browse memory, Ctrl+S to reopen setup, and Ctrl+C to cancel and quit. Progress
+browse memory, Ctrl+S to reopen full setup, and Ctrl+C to cancel and quit. Enter `/wizard` as a prompt
+to reopen the conversational setup directly with the saved configuration. Progress
 and the final King response are shown in the current chat history.
 
 Before each prompt, Kingdom derives an in-memory runtime topology from the saved model assignments.
@@ -51,7 +53,7 @@ and then `y` to permanently delete the selected session (`n` cancels). Memory re
 reported without discarding an otherwise valid King response.
 
 Press `Ctrl+R` while idle to inspect or start local runtimes as a maintenance tool. Setup itself keeps
-the main journey linear: Providers → Models → Benchmark → Wizard → Ready. Ollama downloads stream
+the main journey linear: Providers → Models → Wizard → Ready. Ollama downloads stream
 progress from its loopback API. MLX downloads use Kingdom's managed Hugging Face tooling and private cache. Kingdom
 does not bind a server beyond loopback or stop provider processes; processes started by Kingdom
 intentionally continue after it exits.

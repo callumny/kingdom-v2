@@ -18,10 +18,10 @@ pieces of state:
 Provider-specific behavior stays behind injected interfaces. Ollama downloads through its configured
 loopback `/api/pull` endpoint. MLX downloads through the `hf` executable in Kingdom's managed Python
 environment into Kingdom's Hugging Face cache. Both emit the same typed progress value to the
-application. Downloads remain on Models and must complete before the benchmark begins. A failed
+application. Downloads remain on Models and must complete before the Wizard opens. A failed
 download is visible and blocks progression.
 
-Setup has one path: Providers → Models → Benchmark → Wizard → Ready. The old `m` and setup-time `Ctrl+R` detour is
+Setup has one path: Providers → Models → Wizard → Ready. The old `m` and setup-time `Ctrl+R` detour is
 removed. `Ctrl+R` remains available from the idle chat screen as a maintenance view for installed
 runtime startup and inspection.
 

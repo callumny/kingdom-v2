@@ -1,6 +1,6 @@
 # ADR 0016: Bounded conversational setup Wizard
 
-Status: accepted
+Status: superseded by ADR 0017
 
 ## Decision
 

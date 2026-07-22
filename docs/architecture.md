@@ -20,7 +20,7 @@ Kingdom is deliberately small and layered:
 * `internal/ui` renders presentation without owning domain or infrastructure logic. Its small semantic
   theme maps meaning to colour and its shell owns responsive framing, while application state remains
   unaware of terminal styling.
-* `internal/wizard` owns the local setup benchmark, strict conversational control loop, and the
+* `internal/wizard` owns the strict conversational control loop and the
   bounded tools that may mutate only an in-memory setup draft.
 
 Version 2 keeps its configuration, skills, and memory under `~/.kingdom/v2`. This prevents the strict
@@ -114,7 +114,7 @@ bounded, startup is cancellable, and readiness is capped at two minutes.
 
 After readiness, the Ctrl+R local-model screen remains an idle-screen maintenance tool. It refreshes
 normalized runtime status and can start an installed runtime after confirmation. Setup does not branch
-into this screen: its single path is Providers → Models → Benchmark → Wizard → Ready. No runtime adapter
+into this screen: its single path is Providers → Models → Wizard → Ready. No runtime adapter
 writes topology configuration directly. Arbitrary model paths, remote binds, unloading, and process
 shutdown remain outside the product scope.
 
@@ -130,14 +130,13 @@ Installed fuzzy matches remain first and online results remain visibly marked fo
 Selecting an online result never starts network activity. Models are downloaded only after a separate
 confirmation. Ollama uses its configured loopback pull API; MLX uses the managed runtime's Hugging Face
 CLI and private cache. Downloads report typed progress events, remain on Models, and must finish before
-benchmarking. The setup draft marks a model installed only after its provider adapter reports success.
+the Wizard opens. The setup draft marks a model installed only after its provider adapter reports success.
 
-The benchmark starts every selected runtime on a loopback endpoint, performs one warm-up and one short
-strict-action sample sequentially, and records measured provider token counts/durations. The fastest
-reliable result becomes the Wizard model. MLX benchmark servers use a small isolated port range so
-later role changes cannot conflict with final runtime ports. A provider-start or inference error keeps
-the user on Benchmark with an actionable error; an available model that merely fails the strict-action
-check may use a deterministic fallback.
+The Wizard opens synchronously with deterministic defaults and selects the suggested Worker—the
+smallest selected model—as the likely fastest conversational model. Only that runtime is prepared in
+the background. No model inference runs during entry, so the user can inspect or apply the proposal
+immediately. If runtime preparation fails, the deterministic proposal remains applicable and the TUI
+reports that only conversation is unavailable.
 
 `internal/wizard` is intentionally not a general agent framework. It applies deterministic size-based
 defaults before the conversation and accepts exactly one JSON message or tool action per model turn.
@@ -146,6 +145,11 @@ Ollama server mode. Model arguments use the visible numbers 1–3 rather than lo
 hold no shell, filesystem, memory, installer, or normal orchestration capability. Apply authorization
 is single-use and is granted only by the user's Enter action; successful validation and atomic save
 move the app to Ready.
+
+Typing `/wizard` in normal chat rebuilds the transient draft from persisted role assignments and opens
+the same bounded Wizard directly. It does not enter normal orchestration or require provider/model
+selection again. Esc returns to chat without saving; Apply validates and atomically replaces the
+configuration. Ctrl+S remains the separate route for the full Providers and Models journey.
 
 Provider installation is a separate, injected capability and cannot run until the Providers screen
 receives a `y` confirmation. Ollama's official script is downloaded to a private temporary file and
