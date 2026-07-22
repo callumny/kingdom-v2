@@ -110,6 +110,27 @@ func TestWizardViewMatchesConciseJourney(t *testing.T) {
 	}
 }
 
+func TestWizardExplainsRolesAndPerformanceChoicesBeforeTheConversation(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	w.State = setup.StateWizard
+	view := ansi.Strip(ViewWithPresentation(100, 40, true, w, Presentation{WizardReady: true}).Content)
+
+	for _, want := range []string{
+		"How your Kingdom works",
+		"King — leads the Kingdom and gives the final answer",
+		"Council — optional advisers who review difficult decisions",
+		"Workers — handle delegated tasks in parallel",
+		"Council members — how many advisers are consulted",
+		"Concurrent workers — how many tasks can run at once",
+		"Separate Ollama servers improve parallel performance but use more memory",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("Wizard role guidance missing %q:\n%s", want, view)
+		}
+	}
+	assertViewFits(t, view, 100, 40)
+}
+
 func TestWizardViewWrapsLongConversationMessages(t *testing.T) {
 	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
 	w.State = setup.StateWizard

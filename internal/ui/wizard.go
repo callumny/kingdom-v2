@@ -13,6 +13,7 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 		royalBrand.Render("Wizard"),
 		royalMuted.Render("A short conversation to finish your Kingdom."),
 	}
+	body = append(body, wizardGuidance(wf, contentWidth)...)
 	if p.WizardModel != "" {
 		body = append(body, royalBadge.Render(p.WizardModel))
 	}
@@ -70,6 +71,33 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
 	return body, royalMuted.Render(footer)
+}
+
+func wizardGuidance(wf *setup.Workflow, contentWidth int) []string {
+	lines := []string{"", royalGold.Render("How your Kingdom works")}
+	for _, explanation := range []string{
+		"King — leads the Kingdom and gives the final answer. Use your most capable model.",
+		"Council — optional advisers who review difficult decisions before the King answers.",
+		"Workers — handle delegated tasks in parallel. Faster models work well here.",
+	} {
+		lines = append(lines, styledParagraph(explanation, contentWidth, royalMuted)...)
+	}
+
+	lines = append(lines, "", royalGold.Render("What the options mean"))
+	for _, explanation := range []string{
+		"Council members — how many advisers are consulted.",
+		"Concurrent workers — how many tasks can run at once.",
+	} {
+		lines = append(lines, styledParagraph(explanation, contentWidth, royalMuted)...)
+	}
+	if wf.Draft.Config.Providers.Ollama.Enabled {
+		explanation := "A shared Ollama server uses less memory but may queue parallel work."
+		if wf.Draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
+			explanation = "Separate Ollama servers improve parallel performance but use more memory."
+		}
+		lines = append(lines, styledParagraph(explanation, contentWidth, royalMuted)...)
+	}
+	return append(lines, "")
 }
 
 func hasManagedMLXSelection(wf *setup.Workflow) bool {
