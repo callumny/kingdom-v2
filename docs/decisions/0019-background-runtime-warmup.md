@@ -23,7 +23,9 @@ while the user reviews the proposal overlaps unavoidable local startup work with
 
 Reusing the normal runtime planner keeps ports and role routing identical to a real prompt. Keeping the
 result ephemeral preserves the boundary between durable provider/model choices and generated runtime
-endpoints.
+endpoints. When another process owns a planned MLX port, preparation selects a free loopback port,
+updates the ephemeral topology, and remembers that model endpoint for subsequent prompts in the same
+Kingdom process.
 
 ## Consequences
 

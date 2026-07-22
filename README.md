@@ -43,23 +43,30 @@ Press `Tab` from the Wizard for a model-free Manual setup path. Assign selected 
 `x` to swap King and Worker, adjust Council members and concurrent workers, review the complete proposal,
 and save it through the same validation boundary.
 
-When configuration is ready, the chat accepts multiline prompts (32 KiB max).
-Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
-browse memory, Ctrl+S to reopen full setup, and Ctrl+C to cancel and quit. Enter `/wizard` as a prompt
-to reopen the conversational setup directly with the saved configuration. Progress
-and the final King response are shown in the current chat history.
+When configuration is ready, the chat accepts multiline prompts (32 KiB max). Use `Ctrl+Enter` to
+submit and `Esc` to cancel a running orchestration. Four visible prompt commands keep navigation
+small: `/setup` reopens the Wizard, `/models` opens the combined model library, `/memory` browses
+saved conversations, and `/skills` manages session skills. `/wizard` remains an alias for `/setup`.
+`Ctrl+C` cancels and quits.
+
+The main screen keeps the conversation on the left and deduplicated model activity on the right,
+stacking them on narrower terminals. Each model shows its assigned roles, current activity, and the
+weighted tokens-per-second observed from real responses in this session. Kingdom does not benchmark
+models before chat, so an unused model displays `— tok/s` until it generates text.
 
 Before each prompt, Kingdom derives an in-memory runtime topology from the saved model assignments.
 In separate Ollama mode, each unique active Ollama model is routed to its own consecutive loopback port;
 shared mode uses one base port. Each unique active MLX model always receives its own consecutive
 loopback port. Roles sharing a model share its server. Kingdom reuses healthy servers and starts missing
-ones. Generated runtime endpoints are never written to the configuration file.
+ones. If an MLX port belongs to another process, Kingdom selects the next free loopback port and uses
+that endpoint for the current process. Generated runtime endpoints are never written to the
+configuration file.
 During setup, the same preparation runs speculatively against the proposed configuration. A Wizard or
 manual change cancels stale work and prepares the new proposal; failures remain non-blocking and are
 retried by the first prompt.
 
 Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Before each run, the King receives
-up to six recent exchanges as clearly labelled, untrusted historical context. Press `Ctrl+M` while
+up to six recent exchanges as clearly labelled, untrusted historical context. Enter `/memory` while
 idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return to chat. Press `d`
 and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
 reported without discarding an otherwise valid King response.
@@ -77,7 +84,7 @@ automatically inside the directory from which Kingdom was launched. `write_file`
 and complete JSON arguments before anything with side effects runs. Tool requests and results remain
 in the in-memory chat transcript.
 
-Press `Ctrl+K` while idle to browse skills. Use `j`/`k` or the arrow keys to move, `Enter` to toggle
+Enter `/skills` while idle to browse skills. Use `j`/`k` or the arrow keys to move, `Enter` to toggle
 a skill for the current session, `r` to reload the library, and `Esc` to return to chat. Kingdom ships
 with a small `careful-coder` example and loads user skills from `~/.kingdom/v2/skills`. A skill may be a
 flat Markdown file or a directory containing `SKILL.md`:

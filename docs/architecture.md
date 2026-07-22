@@ -39,7 +39,9 @@ and rewrites only the copied role assignments. Ollama may use one port per model
 always uses one server per model. `cmd/kingdom` asks `internal/localmodels` to ensure those endpoints are
 ready, then passes the copied configuration to orchestration. The TUI sees typed progress events and
 does not block. Persisted topology remains provider/model oriented and never contains generated process
-endpoints.
+endpoints. If a planned MLX port is occupied by another service, the runtime manager selects the next
+free loopback port, returns that endpoint through the mutable preparation plan, and reuses the
+model-to-endpoint mapping for the lifetime of the process.
 
 The model API supports the two topology endpoint kinds without exposing their wire formats: Ollama
 uses `/api/chat`, while OpenAI-compatible runtimes use `/chat/completions`. Requests are non-streaming
@@ -47,8 +49,9 @@ in this stage. Endpoints are revalidated as local before every request, response
 redirects are disabled, and the single retry is limited to transient failures with a cancellation-aware
 delay.
 
-The orchestration engine is independent of Bubble Tea. The King can return a final response, a small
-JSON delegation plan, or one typed tool call. Worker tasks execute concurrently up to the configured
+The orchestration engine is independent of Bubble Tea. Ordinary King prose completes the run directly;
+a small JSON object is interpreted only when it is a valid final, delegation, or typed tool action.
+Worker tasks execute concurrently up to the configured
 limit, Council reviews execute in deterministic slots, and the King synthesizes their ordered
 outcomes. Runs without tools allow four King calls; tool-enabled runs allow eight because a tool call
 and its follow-up consume separate model turns. A delegation remains limited to 32 tasks. Only the
@@ -91,7 +94,7 @@ explain, with a 24 KiB prompt ceiling. Database failures produce warning events 
 continues. Store initialization and unsupported schema versions fail at startup because silently
 using an unknown database format would risk corrupting user data.
 
-The Ctrl+M browser loads session summaries and selected exchanges asynchronously. Each request carries
+The `/memory` browser loads session summaries and selected exchanges asynchronously. Each request carries
 a monotonically increasing generation, so a late result cannot replace the user's current selection.
 Session deletion cascades to its exchanges and requires an explicit confirmation in the TUI.
 
@@ -149,10 +152,10 @@ hold no shell, filesystem, memory, installer, or normal orchestration capability
 is single-use and is granted only by the user's Enter action; successful validation and atomic save
 move the app to Ready.
 
-Typing `/wizard` in normal chat rebuilds the transient draft from persisted role assignments and opens
+Typing `/setup` (or its `/wizard` alias) in normal chat rebuilds the transient draft from persisted role assignments and opens
 the same bounded Wizard directly. It does not enter normal orchestration or require provider/model
 selection again. Esc returns to chat without saving; Apply validates and atomically replaces the
-configuration. Ctrl+S remains the separate route for the full Providers and Models journey.
+configuration. `/models` opens the combined model-selection page directly and returns to chat on Esc.
 
 Provider installation is a separate, injected capability and cannot run until the Providers screen
 receives a `y` confirmation. Ollama's official script is downloaded to a private temporary file and
@@ -179,4 +182,5 @@ The product scope includes configurable king, council, and workers; memory; perm
 and topology. The current implementation has configuration, topology contracts, installed and remote
 model discovery, confirmed model downloads, the complete TUI setup/Wizard flow, local model API
 adapters, King-led orchestration, permissioned tools, Markdown skills, persistent conversation memory,
-local model startup, and a minimal chat screen. Model-server shutdown remains a future milestone.
+local model startup, and a responsive main chat with observed per-model throughput. Model-server
+shutdown remains a future milestone.
