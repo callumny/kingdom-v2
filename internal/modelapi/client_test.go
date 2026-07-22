@@ -90,11 +90,12 @@ func TestCompleteReturnsTimingAndLimitsProviderGeneration(t *testing.T) {
 	for _, test := range []struct {
 		kind       topology.EndpointKind
 		body       string
+		wantPrompt int
 		wantTokens int
 		wantLimit  string
 	}{
-		{topology.KindOllama, `{"message":{"content":"ok"},"eval_count":24,"eval_duration":500000000}`, 24, "options"},
-		{topology.KindOpenAICompatible, `{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":18}}`, 18, "max_tokens"},
+		{topology.KindOllama, `{"message":{"content":"ok"},"prompt_eval_count":12,"eval_count":24,"eval_duration":500000000}`, 12, 24, "options"},
+		{topology.KindOpenAICompatible, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":9,"completion_tokens":18}}`, 9, 18, "max_tokens"},
 	} {
 		var payload map[string]any
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +104,7 @@ func TestCompleteReturnsTimingAndLimitsProviderGeneration(t *testing.T) {
 		}))
 		completion, err := NewClient().Complete(context.Background(), ep(server.URL, test.kind), "model", []Message{{Role: "user", Content: "test"}}, 24)
 		server.Close()
-		if err != nil || completion.Content != "ok" || completion.CompletionTokens != test.wantTokens || completion.GenerationDuration <= 0 {
+		if err != nil || completion.Content != "ok" || completion.PromptTokens != test.wantPrompt || completion.CompletionTokens != test.wantTokens || completion.GenerationDuration <= 0 {
 			t.Fatalf("kind=%s completion=%+v err=%v", test.kind, completion, err)
 		}
 		if _, exists := payload[test.wantLimit]; !exists {

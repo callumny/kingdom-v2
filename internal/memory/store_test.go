@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,7 @@ func TestSaveRecallAndReopen(t *testing.T) {
 		{"session-a", "second question", "second answer"},
 		{"session-b", "third question", "third answer"},
 	} {
-		if err := store.SaveExchange(ctx, exchange.session, exchange.user, exchange.reply); err != nil {
+		if err := store.SaveExchange(ctx, exchange.session, exchange.user, exchange.reply, Usage{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,6 +81,59 @@ func TestSaveRecallAndReopen(t *testing.T) {
 	}
 }
 
+func TestSessionSummaryReportsPreviewTokenUsageAndContext(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "memory.db"))
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.SaveExchange(ctx, "session-a", "Design the session screen", "Use a compact two-column layout.", Usage{PromptTokens: 120, CompletionTokens: 30}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveExchange(ctx, "session-a", "Add resume support", "Restore the selected transcript.", Usage{PromptTokens: 180, CompletionTokens: 40}); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := store.ListSessions(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions=%+v", sessions)
+	}
+	session := sessions[0]
+	if session.Preview != "Design the session screen" || session.TotalTokens != 370 || session.TokenUsageEstimated || session.ContextTokens <= 0 || session.ContextWindow != DefaultContextWindow {
+		t.Fatalf("session=%+v", session)
+	}
+}
+
+func TestCompactSessionKeepsRawTranscriptButReducesFutureContext(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "memory.db"))
+	defer store.Close()
+	ctx := context.Background()
+	for _, prompt := range []string{"first topic", "second topic", "recent topic"} {
+		if err := store.SaveExchange(ctx, "session-a", prompt, "answer to "+prompt, Usage{PromptTokens: 10, CompletionTokens: 5}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := store.SessionExchanges(ctx, "session-a", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompactSession(ctx, "session-a", "Earlier discussion covered the first two topics.", raw[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	contextView, err := store.SessionContext(ctx, "session-a", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contextView.Summary == "" || len(contextView.Exchanges) != 1 || contextView.Exchanges[0].User != "recent topic" {
+		t.Fatalf("context=%+v", contextView)
+	}
+	raw, err = store.SessionExchanges(ctx, "session-a", 10)
+	if err != nil || len(raw) != 3 {
+		t.Fatalf("raw transcript=%+v err=%v", raw, err)
+	}
+}
+
 func TestSaveValidatesAndBoundsContent(t *testing.T) {
 	store := openStore(t, filepath.Join(t.TempDir(), "memory.db"))
 	defer store.Close()
@@ -89,13 +143,13 @@ func TestSaveValidatesAndBoundsContent(t *testing.T) {
 		{"session", "", "reply"},
 		{"session", "user", ""},
 	} {
-		if err := store.SaveExchange(ctx, input.session, input.user, input.reply); err == nil {
+		if err := store.SaveExchange(ctx, input.session, input.user, input.reply, Usage{}); err == nil {
 			t.Fatalf("accepted %+v", input)
 		}
 	}
 	user := strings.Repeat("u", MaxUserBytes+100)
 	reply := strings.Repeat("界", MaxReplyBytes)
-	if err := store.SaveExchange(ctx, "bounded", user, reply); err != nil {
+	if err := store.SaveExchange(ctx, "bounded", user, reply, Usage{}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.SessionExchanges(ctx, "bounded", 1)
@@ -111,7 +165,7 @@ func TestDeleteSessionCascadesExchanges(t *testing.T) {
 	store := openStore(t, filepath.Join(t.TempDir(), "memory.db"))
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.SaveExchange(ctx, "delete-me", "q", "a"); err != nil {
+	if err := store.SaveExchange(ctx, "delete-me", "q", "a", Usage{}); err != nil {
 		t.Fatal(err)
 	}
 	if deleted, err := store.DeleteSession(ctx, "delete-me"); err != nil || !deleted {
@@ -131,7 +185,7 @@ func TestCancelledOperationsReturnContextError(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := store.SaveExchange(ctx, "session", "q", "a"); err == nil {
+	if err := store.SaveExchange(ctx, "session", "q", "a", Usage{}); err == nil {
 		t.Fatal("cancelled save succeeded")
 	}
 	if _, err := store.RecentExchanges(ctx, 1); err == nil {
@@ -147,7 +201,7 @@ func TestConcurrentSavesAreRaceSafe(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			if err := store.SaveExchange(context.Background(), "shared", "question", "answer"); err != nil {
+			if err := store.SaveExchange(context.Background(), "shared", "question", "answer", Usage{}); err != nil {
 				t.Errorf("save: %v", err)
 			}
 		}()
@@ -195,6 +249,36 @@ func TestUnsupportedSchemaVersionIsRejected(t *testing.T) {
 	}
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "version 99") {
 		t.Fatalf("unsupported version error=%v", err)
+	}
+}
+
+func TestVersionOneDatabaseMigratesWithoutLosingConversations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE exchanges (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, user_text TEXT NOT NULL, reply_text TEXT NOT NULL, created_at TEXT NOT NULL)`,
+		`CREATE INDEX exchanges_session_id_id ON exchanges(session_id, id)`,
+		`INSERT INTO sessions(id, started_at, updated_at) VALUES('old', '2026-07-19T12:00:00.000000000Z', '2026-07-19T12:00:00.000000000Z')`,
+		`INSERT INTO exchanges(session_id, user_text, reply_text, created_at) VALUES('old', 'hello', 'welcome', '2026-07-19T12:00:00.000000000Z')`,
+		`PRAGMA user_version = 1`,
+	} {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store := openStore(t, path)
+	defer store.Close()
+	sessions, err := store.ListSessions(context.Background(), 10)
+	if err != nil || len(sessions) != 1 || sessions[0].Preview != "hello" || !sessions[0].TokenUsageEstimated {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
 }
 

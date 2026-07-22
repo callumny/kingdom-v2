@@ -51,6 +51,7 @@ type ModelActivity struct {
 	EndpointKind       topology.EndpointKind
 	Model              string
 	Role               string
+	PromptTokens       int
 	CompletionTokens   int
 	GenerationDuration time.Duration
 }
@@ -76,8 +77,8 @@ type ToolRunner interface {
 }
 
 type MemoryStore interface {
-	RecentExchanges(context.Context, int) ([]memory.Exchange, error)
-	SaveExchange(context.Context, string, string, string) error
+	SessionContext(context.Context, string, int) (memory.Context, error)
+	SaveExchange(context.Context, string, string, string, memory.Usage) error
 }
 
 type Engine struct {
@@ -121,7 +122,12 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 	out := make(chan Event, 128)
 	go func() {
 		defer close(out)
+		runUsage := memory.Usage{}
 		emit := func(ev Event) {
+			if activity := ev.ModelActivity; activity != nil {
+				runUsage.PromptTokens += activity.PromptTokens
+				runUsage.CompletionTokens += activity.CompletionTokens
+			}
 			select {
 			case out <- ev:
 			case <-ctx.Done():
@@ -160,20 +166,20 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 		}
 		recall := ""
 		if e.memory != nil {
-			exchanges, recallErr := e.memory.RecentExchanges(ctx, e.recallLimit)
+			sessionContext, recallErr := e.memory.SessionContext(ctx, e.sessionID, e.recallLimit)
 			if ctx.Err() != nil {
 				return
 			}
 			if recallErr != nil {
 				emit(Event{Type: EventMemoryWarning, Message: "memory recall: " + recallErr.Error()})
-			} else if len(exchanges) > 0 {
-				recall, _ = memory.RenderRecall(exchanges)
-				emit(Event{Type: EventMemoryRecall, Message: fmt.Sprintf("Recalled %d recent exchange(s)", len(exchanges))})
+			} else if sessionContext.Summary != "" || len(sessionContext.Exchanges) > 0 {
+				recall, _ = memory.RenderContext(sessionContext)
+				emit(Event{Type: EventMemoryRecall, Message: fmt.Sprintf("Recalled %d session exchange(s)", len(sessionContext.Exchanges))})
 			}
 		}
 		complete := func(result *Result, persist bool) {
 			if persist && e.memory != nil && ctx.Err() == nil {
-				if saveErr := e.memory.SaveExchange(ctx, e.sessionID, prompt, result.Content); saveErr != nil && ctx.Err() == nil {
+				if saveErr := e.memory.SaveExchange(ctx, e.sessionID, prompt, result.Content, runUsage); saveErr != nil && ctx.Err() == nil {
 					emit(Event{Type: EventMemoryWarning, Message: "memory save: " + saveErr.Error()})
 				}
 			}
@@ -387,11 +393,12 @@ func (e *Engine) completeModel(ctx context.Context, role string, endpoint topolo
 	if err != nil {
 		return "", err
 	}
-	if completion.CompletionTokens > 0 && completion.GenerationDuration > 0 {
+	if completion.PromptTokens > 0 || completion.CompletionTokens > 0 {
 		emit(Event{Type: EventModelActivity, ModelActivity: &ModelActivity{
 			EndpointKind:       endpoint.Kind,
 			Model:              model,
 			Role:               role,
+			PromptTokens:       completion.PromptTokens,
 			CompletionTokens:   completion.CompletionTokens,
 			GenerationDuration: completion.GenerationDuration,
 		}})

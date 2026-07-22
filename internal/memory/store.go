@@ -18,12 +18,14 @@ import (
 )
 
 const (
-	MaxUserBytes    = 32 << 10
-	MaxReplyBytes   = 64 << 10
-	MaxRecallBytes  = 24 << 10
-	maxQueryLimit   = 100
-	schemaVersion   = 1
-	timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+	MaxUserBytes         = 32 << 10
+	MaxReplyBytes        = 64 << 10
+	MaxRecallBytes       = 96 << 10
+	MaxSummaryBytes      = 32 << 10
+	DefaultContextWindow = 32 * 1024
+	maxQueryLimit        = 100
+	schemaVersion        = 2
+	timestampLayout      = "2006-01-02T15:04:05.000000000Z07:00"
 )
 
 type Exchange struct {
@@ -32,13 +34,32 @@ type Exchange struct {
 	User      string
 	Reply     string
 	CreatedAt time.Time
+	Usage     Usage
 }
 
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+}
+
+func (u Usage) Total() int { return u.PromptTokens + u.CompletionTokens }
+
 type Session struct {
-	ID            string
-	StartedAt     time.Time
-	UpdatedAt     time.Time
-	ExchangeCount int
+	ID                  string
+	StartedAt           time.Time
+	UpdatedAt           time.Time
+	ExchangeCount       int
+	Preview             string
+	TotalTokens         int
+	TokenUsageEstimated bool
+	ContextTokens       int
+	ContextWindow       int
+	Summary             string
+}
+
+type Context struct {
+	Summary   string
+	Exchanges []Exchange
 }
 
 type Store struct {
@@ -104,7 +125,7 @@ func NewSessionID() (string, error) {
 	return "session-" + hex.EncodeToString(bytes), nil
 }
 
-func (s *Store) SaveExchange(ctx context.Context, sessionID, user, reply string) error {
+func (s *Store) SaveExchange(ctx context.Context, sessionID, user, reply string, usage Usage) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -119,6 +140,9 @@ func (s *Store) SaveExchange(ctx context.Context, sessionID, user, reply string)
 	}
 	user, _ = truncateUTF8(user, MaxUserBytes)
 	reply, _ = truncateUTF8(reply, MaxReplyBytes)
+	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 {
+		return errors.New("token usage cannot be negative")
+	}
 	now := s.now().UTC().Format(timestampLayout)
 
 	transaction, err := s.db.BeginTx(ctx, nil)
@@ -132,8 +156,8 @@ func (s *Store) SaveExchange(ctx context.Context, sessionID, user, reply string)
 		return fmt.Errorf("save memory session: %w", err)
 	}
 	if _, err = transaction.ExecContext(ctx, `
-		INSERT INTO exchanges(session_id, user_text, reply_text, created_at)
-		VALUES(?, ?, ?, ?)`, sessionID, user, reply, now); err != nil {
+		INSERT INTO exchanges(session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens)
+		VALUES(?, ?, ?, ?, ?, ?)`, sessionID, user, reply, now, usage.PromptTokens, usage.CompletionTokens); err != nil {
 		return fmt.Errorf("save memory exchange: %w", err)
 	}
 	if err = transaction.Commit(); err != nil {
@@ -148,8 +172,8 @@ func (s *Store) RecentExchanges(ctx context.Context, limit int) ([]Exchange, err
 		return nil, nil
 	}
 	return s.queryExchanges(ctx, `
-		SELECT id, session_id, user_text, reply_text, created_at FROM (
-			SELECT id, session_id, user_text, reply_text, created_at
+		SELECT id, session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens FROM (
+			SELECT id, session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens
 			FROM exchanges ORDER BY id DESC LIMIT ?
 		) ORDER BY id ASC`, limit)
 }
@@ -160,8 +184,8 @@ func (s *Store) SessionExchanges(ctx context.Context, sessionID string, limit in
 		return nil, nil
 	}
 	return s.queryExchanges(ctx, `
-		SELECT id, session_id, user_text, reply_text, created_at FROM (
-			SELECT id, session_id, user_text, reply_text, created_at
+		SELECT id, session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens FROM (
+			SELECT id, session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens
 			FROM exchanges WHERE session_id = ? ORDER BY id DESC LIMIT ?
 		) ORDER BY id ASC`, sessionID, limit)
 }
@@ -172,9 +196,14 @@ func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) 
 		return nil, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.id, s.started_at, s.updated_at, COUNT(e.id)
+		SELECT s.id, s.started_at, s.updated_at, COUNT(e.id),
+			s.summary_text,
+			COALESCE((SELECT first.user_text FROM exchanges first WHERE first.session_id = s.id ORDER BY first.id ASC LIMIT 1), ''),
+			COALESCE(SUM(e.prompt_tokens + e.completion_tokens), 0),
+			COALESCE(SUM(CASE WHEN e.id IS NOT NULL AND e.prompt_tokens = 0 AND e.completion_tokens = 0 THEN LENGTH(e.user_text) + LENGTH(e.reply_text) ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN e.id > s.compacted_through_id THEN LENGTH(e.user_text) + LENGTH(e.reply_text) ELSE 0 END), 0)
 		FROM sessions s LEFT JOIN exchanges e ON e.session_id = s.id
-		GROUP BY s.id, s.started_at, s.updated_at
+		GROUP BY s.id, s.started_at, s.updated_at, s.summary_text, s.compacted_through_id
 		ORDER BY s.updated_at DESC, s.id ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list memory sessions: %w", err)
@@ -184,7 +213,8 @@ func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) 
 	for rows.Next() {
 		var session Session
 		var startedAt, updatedAt string
-		if err := rows.Scan(&session.ID, &startedAt, &updatedAt, &session.ExchangeCount); err != nil {
+		var exactTokens, estimatedCharacters, contextCharacters int
+		if err := rows.Scan(&session.ID, &startedAt, &updatedAt, &session.ExchangeCount, &session.Summary, &session.Preview, &exactTokens, &estimatedCharacters, &contextCharacters); err != nil {
 			return nil, fmt.Errorf("scan memory session: %w", err)
 		}
 		session.StartedAt, err = time.Parse(timestampLayout, startedAt)
@@ -195,12 +225,67 @@ func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) 
 		if err != nil {
 			return nil, fmt.Errorf("parse session update: %w", err)
 		}
+		estimatedUsage := estimateTokens(estimatedCharacters)
+		session.TotalTokens = exactTokens + estimatedUsage
+		session.TokenUsageEstimated = estimatedCharacters > 0
+		session.ContextTokens = estimateTokens(len([]rune(session.Summary)) + contextCharacters)
+		session.ContextWindow = DefaultContextWindow
 		sessions = append(sessions, session)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read memory sessions: %w", err)
 	}
 	return sessions, nil
+}
+
+func (s *Store) SessionContext(ctx context.Context, sessionID string, limit int) (Context, error) {
+	limit = normalizedLimit(limit)
+	if limit == 0 {
+		return Context{}, nil
+	}
+	var result Context
+	var compactedThrough int64
+	err := s.db.QueryRowContext(ctx, `SELECT summary_text, compacted_through_id FROM sessions WHERE id = ?`, sessionID).Scan(&result.Summary, &compactedThrough)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Context{}, nil
+	}
+	if err != nil {
+		return Context{}, fmt.Errorf("load session context: %w", err)
+	}
+	result.Exchanges, err = s.queryExchanges(ctx, `
+		SELECT id, session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens FROM (
+			SELECT id, session_id, user_text, reply_text, created_at, prompt_tokens, completion_tokens
+			FROM exchanges WHERE session_id = ? AND id > ? ORDER BY id DESC LIMIT ?
+		) ORDER BY id ASC`, sessionID, compactedThrough, limit)
+	return result, err
+}
+
+func (s *Store) CompactSession(ctx context.Context, sessionID, summary string, throughExchangeID int64) error {
+	sessionID = strings.TrimSpace(sessionID)
+	summary = strings.TrimSpace(summary)
+	if sessionID == "" || summary == "" || throughExchangeID < 1 {
+		return errors.New("session, summary, and exchange boundary are required")
+	}
+	if !utf8.ValidString(summary) {
+		return errors.New("summary must be valid UTF-8")
+	}
+	summary, _ = truncateUTF8(summary, MaxSummaryBytes)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET summary_text = ?, compacted_through_id = ?, updated_at = ?
+		WHERE id = ? AND EXISTS (
+			SELECT 1 FROM exchanges WHERE id = ? AND session_id = sessions.id
+		)`, summary, throughExchangeID, s.now().UTC().Format(timestampLayout), sessionID, throughExchangeID)
+	if err != nil {
+		return fmt.Errorf("compact session: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect compacted session: %w", err)
+	}
+	if changed != 1 {
+		return errors.New("session or exchange boundary not found")
+	}
+	return nil
 }
 
 func (s *Store) DeleteSession(ctx context.Context, sessionID string) (bool, error) {
@@ -238,6 +323,36 @@ func RenderRecall(exchanges []Exchange) (string, bool) {
 	return builder.String(), false
 }
 
+func RenderContext(session Context) (string, bool) {
+	var builder strings.Builder
+	appendBlock := func(block string) bool {
+		separator := ""
+		if builder.Len() > 0 {
+			separator = "\n\n"
+		}
+		value := separator + block
+		remaining := MaxRecallBytes - builder.Len()
+		if len(value) > remaining {
+			value, _ = truncateUTF8(value, remaining)
+			builder.WriteString(value)
+			return true
+		}
+		builder.WriteString(value)
+		return false
+	}
+	if summary := strings.TrimSpace(session.Summary); summary != "" {
+		if appendBlock("Compacted session summary:\n" + summary) {
+			return builder.String(), true
+		}
+	}
+	for _, exchange := range session.Exchanges {
+		if appendBlock(fmt.Sprintf("User: %s\nKing: %s", exchange.User, exchange.Reply)) {
+			return builder.String(), true
+		}
+	}
+	return builder.String(), false
+}
+
 func (s *Store) queryExchanges(ctx context.Context, query string, args ...any) ([]Exchange, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -248,7 +363,7 @@ func (s *Store) queryExchanges(ctx context.Context, query string, args ...any) (
 	for rows.Next() {
 		var exchange Exchange
 		var createdAt string
-		if err := rows.Scan(&exchange.ID, &exchange.SessionID, &exchange.User, &exchange.Reply, &createdAt); err != nil {
+		if err := rows.Scan(&exchange.ID, &exchange.SessionID, &exchange.User, &exchange.Reply, &createdAt, &exchange.Usage.PromptTokens, &exchange.Usage.CompletionTokens); err != nil {
 			return nil, fmt.Errorf("scan memory exchange: %w", err)
 		}
 		exchange.CreatedAt, err = time.Parse(timestampLayout, createdAt)
@@ -283,17 +398,30 @@ func (s *Store) migrate() error {
 		`CREATE TABLE sessions (
 			id TEXT PRIMARY KEY,
 			started_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			updated_at TEXT NOT NULL,
+			summary_text TEXT NOT NULL DEFAULT '',
+			compacted_through_id INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE exchanges (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 			user_text TEXT NOT NULL,
 			reply_text TEXT NOT NULL,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			prompt_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_tokens INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX exchanges_session_id_id ON exchanges(session_id, id)`,
 		fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion),
+	}
+	if version == 1 {
+		statements = []string{
+			`ALTER TABLE sessions ADD COLUMN summary_text TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE sessions ADD COLUMN compacted_through_id INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE exchanges ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE exchanges ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`,
+			fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion),
+		}
 	}
 	for _, statement := range statements {
 		if _, err := transaction.Exec(statement); err != nil {
@@ -314,6 +442,13 @@ func normalizedLimit(limit int) int {
 		return maxQueryLimit
 	}
 	return limit
+}
+
+func estimateTokens(characters int) int {
+	if characters <= 0 {
+		return 0
+	}
+	return (characters + 3) / 4
 }
 
 func truncateUTF8(value string, limit int) (string, bool) {

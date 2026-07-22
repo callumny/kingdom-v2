@@ -13,18 +13,20 @@ import (
 )
 
 type fakeMemory struct {
-	exchanges []memory.Exchange
+	context   memory.Context
 	recallErr error
 	saveErr   error
 	saves     []memory.Exchange
 }
 
-func (m *fakeMemory) RecentExchanges(context.Context, int) ([]memory.Exchange, error) {
-	return append([]memory.Exchange(nil), m.exchanges...), m.recallErr
+func (m *fakeMemory) SessionContext(context.Context, string, int) (memory.Context, error) {
+	result := m.context
+	result.Exchanges = append([]memory.Exchange(nil), result.Exchanges...)
+	return result, m.recallErr
 }
 
-func (m *fakeMemory) SaveExchange(_ context.Context, sessionID, user, reply string) error {
-	m.saves = append(m.saves, memory.Exchange{SessionID: sessionID, User: user, Reply: reply})
+func (m *fakeMemory) SaveExchange(_ context.Context, sessionID, user, reply string, usage memory.Usage) error {
+	m.saves = append(m.saves, memory.Exchange{SessionID: sessionID, User: user, Reply: reply, Usage: usage})
 	return m.saveErr
 }
 
@@ -55,7 +57,7 @@ func TestMemoryRecallReachesKingOnlyAndFinalIsSaved(t *testing.T) {
 	configuration.Topology.Roles.King.Model = "king"
 	configuration.Topology.Roles.Worker.Model = "worker"
 	configuration.Topology.Roles.Council = topology.Assignment{EndpointID: "e", Model: "council"}
-	store := &fakeMemory{exchanges: []memory.Exchange{{SessionID: "earlier", User: "my colour is blue", Reply: "noted"}}}
+	store := &fakeMemory{context: memory.Context{Summary: "The user prefers concise answers.", Exchanges: []memory.Exchange{{SessionID: "current-session", User: "my colour is blue", Reply: "noted"}}}}
 	client := &memoryPromptClient{messages: make(map[string][][]modelapi.Message)}
 
 	var events []Event
@@ -73,7 +75,7 @@ func TestMemoryRecallReachesKingOnlyAndFinalIsSaved(t *testing.T) {
 	defer client.mu.Unlock()
 	for _, call := range client.messages["king"] {
 		joined := messagesText(call)
-		if !strings.Contains(joined, "my colour is blue") || !strings.Contains(joined, "untrusted historical context") {
+		if !strings.Contains(joined, "my colour is blue") || !strings.Contains(joined, "prefers concise answers") || !strings.Contains(joined, "untrusted historical context") {
 			t.Fatalf("King did not receive bounded recall: %q", joined)
 		}
 	}
@@ -121,6 +123,16 @@ func TestPlainTextResponseIsSavedToMemory(t *testing.T) {
 	}
 	if len(store.saves) != 1 || store.saves[0].Reply != "a normal reply" {
 		t.Fatalf("plain response was not saved: %+v", store.saves)
+	}
+}
+
+func TestMeasuredUsageIsSavedWithTheExchange(t *testing.T) {
+	store := &fakeMemory{}
+	client := &completionFake{responses: []modelapi.Completion{{Content: "measured reply", PromptTokens: 40, CompletionTokens: 10}}}
+	for range NewEngine(cfg(), client, WithMemory(store, "session", 100)).Stream(context.Background(), "prompt") {
+	}
+	if len(store.saves) != 1 || store.saves[0].Usage != (memory.Usage{PromptTokens: 40, CompletionTokens: 10}) {
+		t.Fatalf("saved usage=%+v", store.saves)
 	}
 }
 

@@ -73,14 +73,14 @@ func (f *completionFake) Complete(context.Context, topology.Endpoint, string, []
 }
 
 func TestEngineEmitsMeasuredModelActivity(t *testing.T) {
-	client := &completionFake{responses: []modelapi.Completion{{Content: "Hello.", CompletionTokens: 20, GenerationDuration: 2 * time.Second}}}
+	client := &completionFake{responses: []modelapi.Completion{{Content: "Hello.", PromptTokens: 8, CompletionTokens: 20, GenerationDuration: 2 * time.Second}}}
 	var activity *ModelActivity
 	for event := range NewEngine(cfg(), client).Stream(context.Background(), "hello") {
 		if event.Type == EventModelActivity {
 			activity = event.ModelActivity
 		}
 	}
-	if activity == nil || activity.Role != "King" || activity.Model != "m" || activity.EndpointKind != topology.KindOllama || activity.CompletionTokens != 20 || activity.GenerationDuration != 2*time.Second {
+	if activity == nil || activity.Role != "King" || activity.Model != "m" || activity.EndpointKind != topology.KindOllama || activity.PromptTokens != 8 || activity.CompletionTokens != 20 || activity.GenerationDuration != 2*time.Second {
 		t.Fatalf("activity=%+v", activity)
 	}
 }

@@ -28,6 +28,7 @@ type JSONChatClient interface {
 
 type Completion struct {
 	Content            string
+	PromptTokens       int
 	CompletionTokens   int
 	GenerationDuration time.Duration
 }
@@ -337,6 +338,7 @@ func parseCompletion(k topology.EndpointKind, b []byte) (Completion, error) {
 				completion.Content = s
 			}
 		}
+		completion.PromptTokens = jsonInt(v["prompt_eval_count"])
 		completion.CompletionTokens = jsonInt(v["eval_count"])
 		if nanoseconds := jsonInt64(v["eval_duration"]); nanoseconds > 0 {
 			completion.GenerationDuration = time.Duration(nanoseconds)
@@ -353,6 +355,7 @@ func parseCompletion(k topology.EndpointKind, b []byte) (Completion, error) {
 		}
 	}
 	if usage, ok := v["usage"].(map[string]any); ok {
+		completion.PromptTokens = jsonInt(usage["prompt_tokens"])
 		completion.CompletionTokens = jsonInt(usage["completion_tokens"])
 	}
 	return completion, nil
