@@ -13,19 +13,25 @@ go run ./cmd/kingdom
 
 On first run, Kingdom starts at Providers and scans in the background. Use arrows and `Space` to enable
 Ollama or MLX. Press `i` on an uninstalled provider and explicitly confirm before Kingdom installs it
-from its official source. Ollama is then started on its configured loopback port; MLX is installed in
-Kingdom's private Python environment and starts after a model is selected. Provider setup shows named
-steps and a progress bar. Kingdom does not allow the Models screen to open until every enabled provider
-is ready. Continue to Models to see installed Ollama and MLX models in one list. Press `/` to fuzzy
-search both enabled providers; installed matches stay first and online matches are marked for download.
-Select up to three choices. Kingdom asks for confirmation before downloading anything, then lets role
-assignment continue while progress is shown. The role screen suggests the largest selected model for
-King and the smallest for Worker. With three choices it suggests the middle model for Council; with
-fewer choices Council starts disabled. Every suggestion can be changed before the reviewed
-configuration is atomically saved. The Performance screen sets council size, worker concurrency, and
-whether selected Ollama models use separate servers. Separate servers are the default: Kingdom shows
-the consecutive loopback ports it will use before setup is saved. MLX is unchanged because each MLX
-model already has its own server.
+from its official source. Provider setup shows named steps and a progress bar, and Models remains
+locked until every enabled provider is ready.
+
+Models combines installed Ollama and MLX models in aligned Provider, Status, and Model columns. Press
+`/` for one fuzzy search across every enabled provider; installed matches rank first and missing models
+are marked Download. Select up to three. Downloads require confirmation and finish on the Models page
+before setup continues.
+
+Kingdom then performs one warm-up and one short capability test per selected model. The fastest model
+that can reliably produce the Wizard's strict control action becomes the local setup Wizard. The
+benchmark is session-only and never leaves the machine. The Wizard first applies deterministic defaults:
+larger for King, smaller for Worker, Council disabled unless three models were selected, and conservative
+concurrency. Ask for a specific change in plain language or press Enter to Apply & launch.
+
+The Wizard can only call small setup tools: inspect or preview the draft, assign a numbered selected
+model to a role, enable Council, set Council size, set Worker concurrency, choose shared or separate
+Ollama servers, set provider base ports, and apply after explicit user confirmation. It cannot access
+the shell, files, memory, provider installation, or Kingdom's normal workspace tools. Configuration is
+validated and atomically saved only by Apply & launch.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max).
 Use Ctrl+Enter to submit, Esc to cancel a running orchestration, Ctrl+M to
@@ -33,10 +39,10 @@ browse memory, Ctrl+S to reopen setup, and Ctrl+C to cancel and quit. Progress
 and the final King response are shown in the current chat history.
 
 Before each prompt, Kingdom derives an in-memory runtime topology from the saved model assignments.
-In separate Ollama mode, each unique selected Ollama model is routed to its own server and consecutive
-port; roles sharing a model share that server. Kingdom reuses healthy servers and starts missing ones
-on loopback. Shared mode routes every selected Ollama model through the configured base port. Generated
-runtime endpoints are not written to the configuration file.
+In separate Ollama mode, each unique active Ollama model is routed to its own consecutive loopback port;
+shared mode uses one base port. Each unique active MLX model always receives its own consecutive
+loopback port. Roles sharing a model share its server. Kingdom reuses healthy servers and starts missing
+ones. Generated runtime endpoints are never written to the configuration file.
 
 Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Before each run, the King receives
 up to six recent exchanges as clearly labelled, untrusted historical context. Press `Ctrl+M` while
@@ -45,8 +51,8 @@ and then `y` to permanently delete the selected session (`n` cancels). Memory re
 reported without discarding an otherwise valid King response.
 
 Press `Ctrl+R` while idle to inspect or start local runtimes as a maintenance tool. Setup itself keeps
-the main journey linear: Providers → Models → Roles → Review. Ollama downloads stream progress from
-its loopback API. MLX downloads use Kingdom's managed Hugging Face tooling and private cache. Kingdom
+the main journey linear: Providers → Models → Benchmark → Wizard → Ready. Ollama downloads stream
+progress from its loopback API. MLX downloads use Kingdom's managed Hugging Face tooling and private cache. Kingdom
 does not bind a server beyond loopback or stop provider processes; processes started by Kingdom
 intentionally continue after it exits.
 

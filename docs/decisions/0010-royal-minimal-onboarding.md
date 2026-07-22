@@ -1,6 +1,6 @@
 # ADR 0010: Royal-minimal onboarding
 
-Status: accepted
+Status: accepted for visual identity; setup sequence superseded by ADR 0016
 
 ## Decision
 

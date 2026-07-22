@@ -1,17 +1,17 @@
 # ADR 0015: Ephemeral dedicated Ollama server topology
 
-Status: accepted
+Status: accepted; setup control moved by ADR 0016
 
 ## Decision
 
-Kingdom offers an Ollama server-mode control on the Performance screen when at least one active role
+Kingdom offers an Ollama server-mode control through the setup Wizard when at least one active role
 uses the managed Ollama provider. `dedicated` remains the default; `shared` is the alternative.
 
 Dedicated mode assigns one server to each unique selected Ollama model. Ports are consecutive from the
 configured Ollama base port, and ordering is deterministic: King, Worker, then Council, with duplicate
 models removed. Roles sharing a model share its server. Shared mode routes all managed Ollama models to
-the base port. The TUI previews the exact mapping and repeats it on Review. The control is hidden when
-only MLX or custom endpoints are assigned.
+the base port. The Wizard's proposed setup shows the mode and base port. The setting is omitted when
+no selected model uses managed Ollama.
 
 The generated topology is runtime state, not configuration. Immediately before every prompt,
 `internal/config` copies the persisted topology, adds deterministic runtime endpoints, and rewrites the

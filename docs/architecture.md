@@ -20,6 +20,8 @@ Kingdom is deliberately small and layered:
 * `internal/ui` renders presentation without owning domain or infrastructure logic. Its small semantic
   theme maps meaning to colour and its shell owns responsive framing, while application state remains
   unaware of terminal styling.
+* `internal/wizard` owns the local setup benchmark, strict conversational control loop, and the
+  bounded tools that may mutate only an in-memory setup draft.
 
 Version 2 keeps its configuration, skills, and memory under `~/.kingdom/v2`. This prevents the strict
 v2 configuration loader from reading or overwriting files created by the original Kingdom CLI.
@@ -32,11 +34,12 @@ presses and asynchronous messages into setup transitions, while `cmd/kingdom` in
 discover, save, runtime-preparation, and orchestration functions.
 
 Runtime topology is derived immediately before a prompt. `internal/config` creates a deep-enough copy
-of the saved topology, allocates deterministic consecutive loopback ports for unique managed Ollama
-models, and rewrites only the copied role assignments. `cmd/kingdom` asks `internal/localmodels` to
-ensure those endpoints are ready, then passes the copied configuration to orchestration. The TUI sees
-typed progress events and does not block. Persisted topology remains provider/model oriented and never
-contains generated process endpoints.
+of the saved topology, allocates deterministic consecutive loopback ports for unique managed models,
+and rewrites only the copied role assignments. Ollama may use one port per model or a shared port; MLX
+always uses one server per model. `cmd/kingdom` asks `internal/localmodels` to ensure those endpoints are
+ready, then passes the copied configuration to orchestration. The TUI sees typed progress events and
+does not block. Persisted topology remains provider/model oriented and never contains generated process
+endpoints.
 
 The model API supports the two topology endpoint kinds without exposing their wire formats: Ollama
 uses `/api/chat`, while OpenAI-compatible runtimes use `/chat/completions`. Requests are non-streaming
@@ -111,35 +114,38 @@ bounded, startup is cancellable, and readiness is capped at two minutes.
 
 After readiness, the Ctrl+R local-model screen remains an idle-screen maintenance tool. It refreshes
 normalized runtime status and can start an installed runtime after confirmation. Setup does not branch
-into this screen: its single path is Providers → Models → Roles → Review. No runtime adapter writes
-topology configuration directly. Arbitrary model paths, remote binds, unloading, and process shutdown
-remain outside the product scope.
+into this screen: its single path is Providers → Models → Benchmark → Wizard → Ready. No runtime adapter
+writes topology configuration directly. Arbitrary model paths, remote binds, unloading, and process
+shutdown remain outside the product scope.
 
-The setup path is providers -> models -> role assignment -> performance -> review -> ready. The
-performance step configures Council members, concurrent Workers, and—when a managed Ollama model is
-assigned—separate or shared Ollama servers. Separate mode is the default and previews one consecutive
-port per unique selected model; roles using the same model reuse its port. Shared mode uses only the
-configured base port. MLX and custom endpoints are not affected. Provider
-enablement is a persisted user choice; installation/running health and discovered models are transient
-runtime facts. Keeping these separate allows a selected provider with no installed models to progress
-to remote search. A model is identified by its endpoint ID plus model ID, so the user can select up to
-three choices across different providers without collisions. This selection is transient; persisted
-topology still contains only role assignments and their referenced endpoints. Discovery clears old
-results before a rescan, reconciles choices that disappeared, and uses monotonically increasing
-generations so late responses cannot replace current state. On Models, installed inventory is combined
-across every enabled provider before search begins. One fuzzy query searches Ollama and MLX concurrently;
-installed matches remain first and each provider contributes a bounded set of remote results. Search results
-are presentation state, while selected endpoint/model references survive query changes. Role identity
-is the endpoint ID plus model ID, which distinguishes the same model name served by different local
-runtimes. Configuration is not written until review. Once the atomic save command starts, keyboard
-input is temporarily blocked so the UI cannot claim to cancel a filesystem operation already in
-progress.
+Provider enablement is a persisted user choice; installation/running health and discovered models are
+transient runtime facts. Keeping these separate allows a selected provider with no installed models to
+progress to remote search. A model is identified by endpoint ID plus model ID, so up to three choices
+can span providers without collisions. Selection is transient; persisted topology contains only role
+assignments and referenced provider endpoints. Discovery and search use generation numbers so late
+asynchronous results cannot replace newer state. The Models page combines installed inventory across
+enabled providers, aligns Provider/Status/Model columns, and uses one fuzzy query for Ollama and MLX.
+Installed fuzzy matches remain first and online results remain visibly marked for download.
 
 Selecting an online result never starts network activity. Models are downloaded only after a separate
 confirmation. Ollama uses its configured loopback pull API; MLX uses the managed runtime's Hugging Face
-CLI and private cache. Downloads report typed progress events and continue while roles are assigned.
-Review is the readiness gate: it cannot complete while downloads are active or after a failure. The
-setup draft marks a model installed only after its provider adapter reports success.
+CLI and private cache. Downloads report typed progress events, remain on Models, and must finish before
+benchmarking. The setup draft marks a model installed only after its provider adapter reports success.
+
+The benchmark starts every selected runtime on a loopback endpoint, performs one warm-up and one short
+strict-action sample sequentially, and records measured provider token counts/durations. The fastest
+reliable result becomes the Wizard model. MLX benchmark servers use a small isolated port range so
+later role changes cannot conflict with final runtime ports. A provider-start or inference error keeps
+the user on Benchmark with an actionable error; an available model that merely fails the strict-action
+check may use a deterministic fallback.
+
+`internal/wizard` is intentionally not a general agent framework. It applies deterministic size-based
+defaults before the conversation and accepts exactly one JSON message or tool action per model turn.
+Its fixed tools change one setup concern at a time: roles, Council, concurrency, provider ports, and
+Ollama server mode. Model arguments use the visible numbers 1–3 rather than long provider IDs. Tools
+hold no shell, filesystem, memory, installer, or normal orchestration capability. Apply authorization
+is single-use and is granted only by the user's Enter action; successful validation and atomic save
+move the app to Ready.
 
 Provider installation is a separate, injected capability and cannot run until the Providers screen
 receives a `y` confirmation. Ollama's official script is downloaded to a private temporary file and
@@ -156,15 +162,14 @@ allowing infrastructure goroutines to mutate TUI state. Provider intent and read
 all enabled providers must be ready before setup can enter Models. Ollama readiness means installed
 and running; MLX readiness means its managed runtime is installed because its server is model-scoped.
 
-On first assignment, setup sorts selected models by normalized parameter metadata, then a parameter
-hint in the model ID, and finally local file size. The largest choice is suggested for King, the smallest
-for Worker, and a third choice for Council. With fewer than three choices Council starts disabled.
-Council enablement is explicit: when disabled orchestration must skip that stage; when enabled an
-assignment is required. Suggestions are defaults rather than policy: valid manual assignments are
-preserved when the user revisits Models.
+For defaults, setup sorts selected models by normalized parameter metadata, then a parameter hint in
+the model ID, and finally local file size. The largest choice is suggested for King, the smallest for
+Worker, and a third choice for Council. With fewer than three choices Council starts disabled. Council
+enablement is explicit: when disabled orchestration skips that stage; when enabled an assignment is
+required. The Wizard exposes these as editable defaults rather than policy.
 
 The product scope includes configurable king, council, and workers; memory; permissioned tools; skills;
 and topology. The current implementation has configuration, topology contracts, installed and remote
-model discovery, confirmed model downloads, the complete TUI setup/assignment flow, local model API
+model discovery, confirmed model downloads, the complete TUI setup/Wizard flow, local model API
 adapters, King-led orchestration, permissioned tools, Markdown skills, persistent conversation memory,
 local model startup, and a minimal chat screen. Model-server shutdown remains a future milestone.

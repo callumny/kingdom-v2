@@ -1,6 +1,6 @@
 # ADR 0014: Unified installed and remote model library
 
-Status: accepted
+Status: accepted; post-selection flow amended by ADR 0016
 
 ## Decision
 
@@ -18,10 +18,10 @@ pieces of state:
 Provider-specific behavior stays behind injected interfaces. Ollama downloads through its configured
 loopback `/api/pull` endpoint. MLX downloads through the `hf` executable in Kingdom's managed Python
 environment into Kingdom's Hugging Face cache. Both emit the same typed progress value to the
-application. Downloads may continue while the user assigns roles, but Review cannot complete until
-all selected models are installed. A failed download is visible and blocks Review.
+application. Downloads remain on Models and must complete before the benchmark begins. A failed
+download is visible and blocks progression.
 
-Setup has one path: Providers → Models → Roles → Review. The old `m` and setup-time `Ctrl+R` detour is
+Setup has one path: Providers → Models → Benchmark → Wizard → Ready. The old `m` and setup-time `Ctrl+R` detour is
 removed. `Ctrl+R` remains available from the idle chat screen as a maintenance view for installed
 runtime startup and inspection.
 
