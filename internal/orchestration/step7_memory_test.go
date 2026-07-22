@@ -114,13 +114,13 @@ func TestFailedRunIsNotSavedToMemory(t *testing.T) {
 	}
 }
 
-func TestMalformedFallbackIsNotSavedToMemory(t *testing.T) {
+func TestPlainTextResponseIsSavedToMemory(t *testing.T) {
 	store := &fakeMemory{}
-	client := &fake{responses: []string{"not json", "still not json"}}
+	client := &fake{responses: []string{"a normal reply"}}
 	for range NewEngine(cfg(), client, WithMemory(store, "session", 6)).Stream(context.Background(), "prompt") {
 	}
-	if len(store.saves) != 0 {
-		t.Fatalf("malformed fallback was saved: %+v", store.saves)
+	if len(store.saves) != 1 || store.saves[0].Reply != "a normal reply" {
+		t.Fatalf("plain response was not saved: %+v", store.saves)
 	}
 }
 

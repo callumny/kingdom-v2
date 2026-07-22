@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
@@ -90,6 +91,7 @@ type Model struct {
 	modelRemoveGen          uint64
 	modelRemoveCancel       context.CancelFunc
 	modelsReturnToReady     bool
+	modelMetrics            map[string]modelMetric
 	perfFocus               int
 	prepareWizard           WizardPrepareFunc
 	wizardClient            modelapi.ChatClient
@@ -109,6 +111,11 @@ type Model struct {
 	scanning                bool
 	saveGen                 uint64
 	saving                  bool
+}
+
+type modelMetric struct {
+	completionTokens   int
+	generationDuration time.Duration
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
 type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
@@ -237,6 +244,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		screen:          w.State,
 		gate:            &setup.GenerationGate{},
 		chat:            ui.NewChatInput(),
+		modelMetrics:    make(map[string]modelMetric),
 		wizardInput:     ui.NewChatInput(),
 	}
 	if model.setup && model.screen == setup.StateProviders && services.Discover != nil {
@@ -612,6 +620,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.nextEvent()
 		}
 		switch x.Event.Type {
+		case orchestration.EventModelActivity:
+			if activity := x.Event.ModelActivity; activity != nil && activity.CompletionTokens > 0 && activity.GenerationDuration > 0 {
+				key := modelMetricKey(activity.EndpointKind, activity.Model)
+				metric := m.modelMetrics[key]
+				metric.completionTokens += activity.CompletionTokens
+				metric.generationDuration += activity.GenerationDuration
+				m.modelMetrics[key] = metric
+			}
 		case orchestration.EventRuntimePreparing:
 			m.progress = "Starting local model servers…"
 		case orchestration.EventStarted:

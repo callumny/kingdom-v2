@@ -58,6 +58,10 @@ func (r *recordingClient) snapshot() []recordedCall {
 	return append([]recordedCall(nil), r.calls...)
 }
 
+func isKingCall(call recordedCall) bool {
+	return strings.HasPrefix(call.role, "You are the King.")
+}
+
 func TestBufferedStreamCompletesWithoutImmediateConsumer(t *testing.T) {
 	f := &recordingClient{script: func(recordedCall) (string, error, time.Duration) { return `{"type":"final","content":"done"}`, nil, 0 }}
 	ch := NewEngine(cfg(), f).Stream(context.Background(), "p")
@@ -65,25 +69,16 @@ func TestBufferedStreamCompletesWithoutImmediateConsumer(t *testing.T) {
 	for range ch {
 	}
 }
-func TestFinalBudgetDelegationDoesNotDispatch(t *testing.T) {
-	var mu sync.Mutex
-	king, workers, council := 0, 0, 0
+func TestPlainTextDoesNotDispatch(t *testing.T) {
+	workers, council := 0, 0
 	f := &recordingClient{script: func(c recordedCall) (string, error, time.Duration) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch c.role {
-		case "You are the King. Respond with JSON action.":
-			king++
-			if king == 1 {
-				return "bad", nil, 0
-			}
-			return `{"type":"delegate","tasks":[{"id":"x","prompt":"x"}]}`, nil, 0
-		case "Repair malformed action; output exact JSON.":
-			return `{"type":"delegate","tasks":[{"id":"x","prompt":"x"}]}`, nil, 0
-		case "You are a Worker. Solve the assigned task.":
+		switch {
+		case isKingCall(c):
+			return "A direct answer.", nil, 0
+		case c.role == "You are a Worker. Solve the assigned task.":
 			workers++
 			return "worker", nil, 0
-		case "You are a Council reviewer. Review worker outcomes.":
+		case c.role == "You are a Council reviewer. Review worker outcomes.":
 			council++
 			return "review", nil, 0
 		}
@@ -93,56 +88,16 @@ func TestFinalBudgetDelegationDoesNotDispatch(t *testing.T) {
 	for e := range NewEngine(cfg(), f).Stream(context.Background(), "p") {
 		last = e
 	}
-	if last.Result == nil || !last.Result.LimitReached {
+	if last.Result == nil || last.Result.Content != "A direct answer." || last.Result.LimitReached {
 		t.Fatal(last)
 	}
-	// Two earlier delegations legitimately dispatch. The fourth King-model
-	// call is the final-budget delegation and must not dispatch a third batch.
-	if workers != 2 || council != 2 {
+	if workers != 0 || council != 0 {
 		t.Fatalf("workers=%d council=%d", workers, council)
 	}
 }
-func TestFinalBudgetMalformedIsMarkedRawAndLimited(t *testing.T) {
-	n := 0
-	f := &recordingClient{script: func(recordedCall) (string, error, time.Duration) { n++; return "bad", nil, 0 }}
-	var last Event
-	marked := false
-	for e := range NewEngine(cfg(), f).Stream(context.Background(), "p") {
-		last = e
-		if e.Result != nil && e.Result.FallbackRaw {
-			marked = true
-		}
-	}
-	if !marked {
-		t.Fatal(last)
-	}
-}
-func TestMalformedRepairFallbackVariants(t *testing.T) {
-	for _, seq := range [][]string{{"bad", "still bad"}, {"bad"}} {
-		i := 0
-		f := &recordingClient{script: func(recordedCall) (string, error, time.Duration) {
-			s := seq[minInt(i, len(seq)-1)]
-			i++
-			return s, nil, 0
-		}}
-		var last Event
-		for e := range NewEngine(cfg(), f).Stream(context.Background(), "p") {
-			last = e
-		}
-		if last.Result == nil || !last.Result.FallbackRaw {
-			t.Fatal(seq, last)
-		}
-	}
-}
-
-func TestRepairTransportFailureEmitsFailed(t *testing.T) {
-	sentinel := errors.New("repair transport sentinel")
-	n := 0
+func TestKingTransportFailureEmitsFailed(t *testing.T) {
+	sentinel := errors.New("King transport sentinel")
 	f := &recordingClient{script: func(c recordedCall) (string, error, time.Duration) {
-		n++
-		if n == 1 {
-			return "malformed", nil, 0
-		}
 		return "", sentinel, 0
 	}}
 	var events []Event
@@ -186,7 +141,7 @@ func TestWorkerConcurrencyActuallyBoundedAndParallel(t *testing.T) {
 	kingCalls := 0
 	var scriptMu sync.Mutex
 	f := &recordingClient{script: func(c recordedCall) (string, error, time.Duration) {
-		if c.role == "You are the King. Respond with JSON action." {
+		if isKingCall(c) {
 			scriptMu.Lock()
 			defer scriptMu.Unlock()
 			kingCalls++
@@ -226,7 +181,7 @@ func TestReverseWorkerCompletionStillSynthesizesPlanOrder(t *testing.T) {
 	kingCalls := 0
 	var scriptMu sync.Mutex
 	f := &recordingClient{script: func(c recordedCall) (string, error, time.Duration) {
-		if c.role == "You are the King. Respond with JSON action." {
+		if isKingCall(c) {
 			scriptMu.Lock()
 			defer scriptMu.Unlock()
 			kingCalls++
@@ -246,32 +201,26 @@ func TestReverseWorkerCompletionStillSynthesizesPlanOrder(t *testing.T) {
 	for range NewEngine(c, f).Stream(context.Background(), "p") {
 	}
 	for _, cc := range f.snapshot() {
-		if cc.role == "You are the King. Respond with JSON action." && strings.Contains(cc.user, "task a:") && strings.Index(cc.user, "task a:") > strings.Index(cc.user, "task b:") {
+		if isKingCall(cc) && strings.Contains(cc.user, "task a:") && strings.Index(cc.user, "task a:") > strings.Index(cc.user, "task b:") {
 			t.Fatal(cc.user)
 		}
 	}
-}
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 func TestPartialFailureTextReachesCouncilAndKing(t *testing.T) {
 	c := cfg()
 	c.Topology.Roles.Council = topology.Assignment{EndpointID: "e", Model: "c"}
 	kingCalls := 0
 	f := &recordingClient{script: func(c recordedCall) (string, error, time.Duration) {
-		switch c.role {
-		case "You are the King. Respond with JSON action.":
+		switch {
+		case isKingCall(c):
 			kingCalls++
 			if kingCalls == 1 {
 				return `{"type":"delegate","tasks":[{"id":"a","prompt":"a"}]}`, nil, 0
 			}
 			return `{"type":"final","content":"x"}`, nil, 0
-		case "You are a Worker. Solve the assigned task.":
+		case c.role == "You are a Worker. Solve the assigned task.":
 			return "", errors.New("worker failed"), 0
-		case "You are a Council reviewer. Review worker outcomes.":
+		case c.role == "You are a Council reviewer. Review worker outcomes.":
 			return "review", nil, 0
 		}
 		return "", errors.New("unexpected call"), 0
@@ -289,16 +238,16 @@ func TestCouncilReviewsAreDeterministicallyNumbered(t *testing.T) {
 	c.Topology.Roles.Council = topology.Assignment{EndpointID: "e", Model: "c"}
 	kingCalls := 0
 	f := &recordingClient{script: func(call recordedCall) (string, error, time.Duration) {
-		switch call.role {
-		case "You are the King. Respond with JSON action.":
+		switch {
+		case isKingCall(call):
 			kingCalls++
 			if kingCalls == 1 {
 				return `{"type":"delegate","tasks":[{"id":"a","prompt":"a"}]}`, nil, 0
 			}
 			return `{"type":"final","content":"x"}`, nil, 0
-		case "You are a Worker. Solve the assigned task.":
+		case call.role == "You are a Worker. Solve the assigned task.":
 			return "w", nil, 0
-		case "You are a Council reviewer. Review worker outcomes.":
+		case call.role == "You are a Council reviewer. Review worker outcomes.":
 			for i := 1; i <= 3; i++ {
 				if strings.Contains(call.user, fmt.Sprintf("Review slot %d of 3", i)) {
 					return fmt.Sprintf("r%d", i), nil, time.Duration(4-i) * time.Millisecond
@@ -312,7 +261,7 @@ func TestCouncilReviewsAreDeterministicallyNumbered(t *testing.T) {
 	calls := f.snapshot()
 	found := false
 	for _, c := range calls {
-		if c.role == "You are the King. Respond with JSON action." && strings.Contains(c.user, "review 1:") {
+		if isKingCall(c) && strings.Contains(c.user, "review 1:") {
 			found = true
 			if !(strings.Index(c.user, "review 1: r1") < strings.Index(c.user, "review 2: r2") && strings.Index(c.user, "review 2: r2") < strings.Index(c.user, "review 3: r3")) {
 				t.Fatal(c.user)
@@ -327,7 +276,7 @@ func TestCancellationAfterWorkersStartClosesStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
 	f := &recordingClient{script: func(c recordedCall) (string, error, time.Duration) {
-		if c.role == "You are the King. Respond with JSON action." {
+		if isKingCall(c) {
 			return `{"type":"delegate","tasks":[{"id":"a","prompt":"a"}]}`, nil, 0
 		}
 		close(started)

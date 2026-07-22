@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/config"
@@ -77,6 +78,25 @@ func TestProgressEventsAndCompletion(t *testing.T) {
 	m, cmd = update(m, m.nextEvent()())
 	if m.running || !strings.Contains(m.history[len(m.history)-1], "done") || cmd != nil {
 		t.Fatalf("completion not handled")
+	}
+}
+
+func TestModelActivityUpdatesTheMainScreenSpeed(t *testing.T) {
+	m := New(completeConfig())
+	m.running = true
+	m.runGen = 1
+	m, command := update(m, chatEventMsg{Generation: 1, Event: orchestration.Event{
+		Type: orchestration.EventModelActivity,
+		ModelActivity: &orchestration.ModelActivity{
+			EndpointKind:       topology.KindOllama,
+			Model:              "k",
+			Role:               "King",
+			CompletionTokens:   30,
+			GenerationDuration: 2 * time.Second,
+		},
+	}})
+	if !strings.Contains(m.View().Content, "15.0 tok/s") {
+		t.Fatalf("model speed not rendered: command=%v view=%s", command, m.View().Content)
 	}
 }
 
@@ -419,12 +439,12 @@ func TestChatIntegrationDelegatesWorkersCouncilAndKing(t *testing.T) {
 	callsMu.Lock()
 	got := append([]string(nil), calls...)
 	callsMu.Unlock()
-	want := []string{"king:You are the King. Respond with JSON action.", "worker:You are a Worker. Solve the assigned task.", "council:You are a Council reviewer. Review worker outcomes.", "king:You are the King. Respond with JSON action."}
+	want := []string{"king:You are the King.", "worker:You are a Worker. Solve the assigned task.", "council:You are a Council reviewer. Review worker outcomes.", "king:You are the King."}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected role calls: %v", got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !strings.HasPrefix(got[i], want[i]) {
 			t.Fatalf("call %d=%q, want %q (all=%v)", i, got[i], want[i], got)
 		}
 	}

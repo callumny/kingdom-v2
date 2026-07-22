@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/callumny/kingdom/internal/config"
@@ -31,6 +32,7 @@ const (
 	EventToolCompleted    EventType = "tool-completed"
 	EventMemoryRecall     EventType = "memory-recall"
 	EventMemoryWarning    EventType = "memory-warning"
+	EventModelActivity    EventType = "model-activity"
 	EventCompleted        EventType = "completed"
 	EventFailed           EventType = "failed"
 )
@@ -42,15 +44,31 @@ type Result struct {
 	Error        string `json:"error,omitempty"`
 	Message      string `json:"message,omitempty"`
 }
+
+// ModelActivity describes one completed local-model generation. The app uses
+// it to show measured throughput without running a separate benchmark.
+type ModelActivity struct {
+	EndpointKind       topology.EndpointKind
+	Model              string
+	Role               string
+	CompletionTokens   int
+	GenerationDuration time.Duration
+}
+
 type Event struct {
-	Type       EventType
-	Message    string
-	Result     *Result
-	TaskID     string
-	Content    string
-	Approval   *ApprovalRequest
-	ToolCall   *tools.Call
-	ToolResult *tools.Result
+	Type          EventType
+	Message       string
+	Result        *Result
+	TaskID        string
+	Content       string
+	Approval      *ApprovalRequest
+	ToolCall      *tools.Call
+	ToolResult    *tools.Result
+	ModelActivity *ModelActivity
+}
+
+type completionClient interface {
+	Complete(context.Context, topology.Endpoint, string, []modelapi.Message, int) (modelapi.Completion, error)
 }
 
 type ToolRunner interface {
@@ -167,7 +185,6 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 		raw := ""
 		var feedback []string
 		kingCalls := 0
-		malformedBudget := false
 		kingLimit := 4
 		if e.tools != nil {
 			kingLimit = 8
@@ -185,39 +202,19 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 				msgs = append(msgs, modelapi.Message{Role: "user", Content: item})
 			}
 			kingCalls++
-			raw, err = e.client.Chat(ctx, kingEp, kingAs.Model, msgs)
+			raw, err = e.completeModel(ctx, "King", kingEp, kingAs.Model, msgs, emit)
 			if err != nil {
 				fail(err)
 				return
 			}
+			if strings.TrimSpace(raw) == "" {
+				fail(fmt.Errorf("King returned an empty response"))
+				return
+			}
 			act, perr := parseAction(raw)
 			if perr != nil {
-				if kingCalls >= kingLimit {
-					malformedBudget = true
-				}
-				if kingCalls >= kingLimit {
-					complete(&Result{Content: raw, LimitReached: true, FallbackRaw: true, Message: "king call limit reached"}, false)
-					return
-				}
-				kingCalls++
-				repair, re := e.client.Chat(ctx, kingEp, kingAs.Model, []modelapi.Message{{Role: "system", Content: "Repair malformed action; output exact JSON."}, {Role: "user", Content: raw}})
-				if re != nil {
-					fail(re)
-					return
-				}
-				act, perr = parseAction(repair)
-				if perr != nil {
-					raw = repair
-				}
-				if perr != nil {
-					complete(&Result{Content: raw, FallbackRaw: true, LimitReached: kingCalls >= kingLimit, Message: func() string {
-						if kingCalls >= kingLimit {
-							return "king call limit reached"
-						}
-						return ""
-					}()}, false)
-					return
-				}
+				complete(&Result{Content: raw}, true)
+				return
 			}
 			if act.Type != "final" && kingCalls >= kingLimit {
 				complete(&Result{Content: raw, LimitReached: true, Message: "king call limit reached"}, false)
@@ -229,12 +226,12 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 			}
 			if act.Type == "delegate" {
 				emit(Event{Type: EventWorkersRunning})
-				workers := e.runWorkers(ctx, act.Tasks)
+				workers := e.runWorkers(ctx, act.Tasks, emit)
 				if ctx.Err() != nil {
 					return
 				}
 				emit(Event{Type: EventCouncilReviewing})
-				reviews := e.runCouncil(ctx, prompt, workers)
+				reviews := e.runCouncil(ctx, prompt, workers, emit)
 				if ctx.Err() != nil {
 					return
 				}
@@ -272,7 +269,7 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 			feedback = append(feedback, "Tool result: "+string(encoded))
 			emit(Event{Type: EventKingThinking})
 		}
-		complete(&Result{Content: raw, LimitReached: true, FallbackRaw: malformedBudget, Message: "king call limit reached"}, false)
+		complete(&Result{Content: raw, LimitReached: true, Message: "king call limit reached"}, false)
 	}()
 	return out
 }
@@ -299,11 +296,11 @@ func truncateUTF8(value string, limit int) string {
 }
 
 func (e *Engine) kingSystemPrompt() string {
-	base := "You are the King. Respond with JSON action."
+	base := `You are the King. Answer the user directly in clear plain text. Only use a JSON action when you need to delegate work:
+{"type":"delegate","tasks":[{"id":"...","prompt":"..."}]}`
 	if e.tools != nil {
-		base += ` Use exactly one action per response:
-{"type":"final","content":"..."}
-{"type":"delegate","tasks":[{"id":"...","prompt":"..."}]}
+		base += `
+To call a tool, use this JSON action:
 {"type":"tool","tool":{"id":"unique-id","name":"tool-name","arguments":{...}}}
 Only you may request tools. Available tools: list_files(path,max_depth), read_file(path), search(path,query), write_file(path,content), edit_file(path,old,new), run_command(command). Read tools run automatically. Writes, edits, and commands require the user to approve every call.`
 	}
@@ -381,7 +378,28 @@ func (e *Engine) endpoint(a topology.Assignment) (topology.Endpoint, topology.As
 	}
 	return topology.Endpoint{}, a, fmt.Errorf("missing endpoint %s", a.EndpointID)
 }
-func (e *Engine) runWorkers(ctx context.Context, tasks []task) []taskResult {
+func (e *Engine) completeModel(ctx context.Context, role string, endpoint topology.Endpoint, model string, messages []modelapi.Message, emit func(Event)) (string, error) {
+	client, ok := e.client.(completionClient)
+	if !ok {
+		return e.client.Chat(ctx, endpoint, model, messages)
+	}
+	completion, err := client.Complete(ctx, endpoint, model, messages, 0)
+	if err != nil {
+		return "", err
+	}
+	if completion.CompletionTokens > 0 && completion.GenerationDuration > 0 {
+		emit(Event{Type: EventModelActivity, ModelActivity: &ModelActivity{
+			EndpointKind:       endpoint.Kind,
+			Model:              model,
+			Role:               role,
+			CompletionTokens:   completion.CompletionTokens,
+			GenerationDuration: completion.GenerationDuration,
+		}})
+	}
+	return completion.Content, nil
+}
+
+func (e *Engine) runWorkers(ctx context.Context, tasks []task, emit func(Event)) []taskResult {
 	res := make([]taskResult, len(tasks))
 	concurrency := e.cfg.WorkerConcurrency
 	if concurrency < 1 {
@@ -406,14 +424,14 @@ func (e *Engine) runWorkers(ctx context.Context, tasks []task) []taskResult {
 				return
 			}
 			defer func() { <-sem }()
-			s, er := e.client.Chat(ctx, ep, a.Model, []modelapi.Message{{Role: "system", Content: "You are a Worker. Solve the assigned task."}, {Role: "user", Content: t.Prompt}})
+			s, er := e.completeModel(ctx, "Workers", ep, a.Model, []modelapi.Message{{Role: "system", Content: "You are a Worker. Solve the assigned task."}, {Role: "user", Content: t.Prompt}}, emit)
 			res[i].Content, res[i].Err = s, er
 		}(i, t)
 	}
 	wg.Wait()
 	return res
 }
-func (e *Engine) runCouncil(ctx context.Context, prompt string, w []taskResult) []string {
+func (e *Engine) runCouncil(ctx context.Context, prompt string, w []taskResult, emit func(Event)) []string {
 	a := e.cfg.Topology.EffectiveCouncil()
 	if a == nil {
 		return nil
@@ -433,7 +451,7 @@ func (e *Engine) runCouncil(ctx context.Context, prompt string, w []taskResult) 
 		go func(i int) {
 			defer wg.Done()
 			cmsg := fmt.Sprintf("Review slot %d of %d.\nOriginal prompt: %s\nOutcomes:\n%s", i+1, len(r), prompt, formatOutcomes(w, nil))
-			s, er := e.client.Chat(ctx, ep, as.Model, []modelapi.Message{{Role: "system", Content: "You are a Council reviewer. Review worker outcomes."}, {Role: "user", Content: cmsg}})
+			s, er := e.completeModel(ctx, "Council", ep, as.Model, []modelapi.Message{{Role: "system", Content: "You are a Council reviewer. Review worker outcomes."}, {Role: "user", Content: cmsg}}, emit)
 			if er != nil {
 				r[i] = er.Error()
 			} else {

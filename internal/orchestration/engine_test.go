@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/modelapi"
@@ -45,6 +46,42 @@ func TestDirectFinal(t *testing.T) {
 	}
 	if ev[len(ev)-1].Result.Content != "done" {
 		t.Fatal(ev)
+	}
+}
+
+func TestPlainTextKingResponseCompletesWithoutRepair(t *testing.T) {
+	f := &fake{responses: []string{"Hello from the King."}}
+	var last Event
+	for event := range NewEngine(cfg(), f).Stream(context.Background(), "hello") {
+		last = event
+	}
+	if f.count() != 1 || last.Type != EventCompleted || last.Result == nil || last.Result.Content != "Hello from the King." {
+		t.Fatalf("calls=%d last=%+v", f.count(), last)
+	}
+}
+
+type completionFake struct{ responses []modelapi.Completion }
+
+func (f *completionFake) Chat(context.Context, topology.Endpoint, string, []modelapi.Message) (string, error) {
+	return "", errors.New("text-only Chat should not be used")
+}
+
+func (f *completionFake) Complete(context.Context, topology.Endpoint, string, []modelapi.Message, int) (modelapi.Completion, error) {
+	response := f.responses[0]
+	f.responses = f.responses[1:]
+	return response, nil
+}
+
+func TestEngineEmitsMeasuredModelActivity(t *testing.T) {
+	client := &completionFake{responses: []modelapi.Completion{{Content: "Hello.", CompletionTokens: 20, GenerationDuration: 2 * time.Second}}}
+	var activity *ModelActivity
+	for event := range NewEngine(cfg(), client).Stream(context.Background(), "hello") {
+		if event.Type == EventModelActivity {
+			activity = event.ModelActivity
+		}
+	}
+	if activity == nil || activity.Role != "King" || activity.Model != "m" || activity.EndpointKind != topology.KindOllama || activity.CompletionTokens != 20 || activity.GenerationDuration != 2*time.Second {
+		t.Fatalf("activity=%+v", activity)
 	}
 }
 func TestCancellationCloses(t *testing.T) {
@@ -215,22 +252,24 @@ func TestCouncilCallsRespectSizeAndPreserveOrder(t *testing.T) {
 		t.Fatal(f.count())
 	}
 }
-func TestMalformedActionRepairPaths(t *testing.T) {
-	f := &fake{responses: []string{"bad", `{"type":"final","content":"fixed"}`}}
+func TestNonActionResponseCompletesAsPlainText(t *testing.T) {
+	f := &fake{responses: []string{"bad"}}
 	ev := []Event{}
 	for x := range NewEngine(cfg(), f).Stream(context.Background(), "p") {
 		ev = append(ev, x)
 	}
-	if f.count() != 2 || ev[len(ev)-1].Result.Content != "fixed" {
+	if f.count() != 1 || ev[len(ev)-1].Result.Content != "bad" {
 		t.Fatalf("calls=%d ev=%v", f.count(), ev)
 	}
 }
 func TestInvalidDelegationNeverRunsWorkers(t *testing.T) {
 	f := &fake{responses: []string{`{"type":"delegate","tasks":[]}`}}
-	for range NewEngine(cfg(), f).Stream(context.Background(), "p") {
+	var last Event
+	for event := range NewEngine(cfg(), f).Stream(context.Background(), "p") {
+		last = event
 	}
-	if f.count() != 2 {
-		t.Fatal(f.count())
+	if f.count() != 1 || last.Result == nil || last.Result.Content != `{"type":"delegate","tasks":[]}` {
+		t.Fatalf("calls=%d last=%+v", f.count(), last)
 	}
 }
 func TestFourKingCallLimit(t *testing.T) {
