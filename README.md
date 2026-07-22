@@ -45,9 +45,10 @@ and save it through the same validation boundary.
 
 When configuration is ready, the chat accepts multiline prompts (32 KiB max). Use `Ctrl+Enter` to
 submit and `Esc` to cancel a running orchestration. Four visible prompt commands keep navigation
-small: `/setup` reopens the Wizard, `/models` opens the combined model library, `/memory` browses
-saved conversations, and `/skills` manages session skills. `/wizard` remains an alias for `/setup`.
-`Ctrl+C` cancels and quits.
+small: `/setup` reopens the Wizard, `/models` opens the combined model library, `/sessions` browses
+and resumes saved conversations, and `/skills` manages session skills. `/new` starts a clean session;
+`/compact` summarizes older context while retaining the most recent two turns verbatim. `/wizard` and
+`/memory` remain compatibility aliases. `Ctrl+C` cancels and quits.
 
 The main screen keeps the conversation on the left and deduplicated model activity on the right,
 stacking them on narrower terminals. Each model shows its assigned roles, current activity, and the
@@ -65,10 +66,13 @@ During setup, the same preparation runs speculatively against the proposed confi
 manual change cancels stale work and prepares the new proposal; failures remain non-blocking and are
 retried by the first prompt.
 
-Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Before each run, the King receives
-up to six recent exchanges as clearly labelled, untrusted historical context. Enter `/memory` while
-idle to browse sessions, use `j`/`k` to move, `r` to reload, and `Esc` to return to chat. Press `d`
-and then `y` to permanently delete the selected session (`n` cancels). Memory read/write failures are
+Completed exchanges are stored locally in `~/.kingdom/v2/memory.db`. Each run receives only the active
+session's compacted summary and uncompacted exchanges, clearly labelled as untrusted historical data.
+Enter `/sessions` while idle to see a one-line preview, turn count, cumulative model tokens, and an
+estimated share of a conservative 32k context window. Use `j`/`k` to move, `Enter` to resume, `n` to
+start fresh, `c` to compact, `r` to reload, and `Esc` to return. Press `d` and then `y` to permanently
+delete the selected session (`n` cancels). Raw exchanges remain stored after compaction. Historical
+sessions created before token accounting are marked with `~` estimates. Memory read/write failures are
 reported without discarding an otherwise valid King response.
 
 Press `Ctrl+R` while idle to inspect or start local runtimes as a maintenance tool. Setup itself keeps

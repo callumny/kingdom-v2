@@ -81,22 +81,26 @@ action schema, permission checks, or safety limits.
 
 Memory is a local, single-file SQLite database accessed through `database/sql`. The infrastructure
 package owns schema migration, permissions, queries, and size limits; orchestration depends only on a
-two-method recall/save interface, and the TUI depends on a separate browse/delete interface. This
-keeps SQL out of both the workflow and presentation layers. One session ID is generated per Kingdom
-process. Successful terminal responses are stored as user/King exchange pairs; failed or cancelled
-runs are not stored.
+two-method context/save interface, and the TUI depends on a separate session-management interface. This
+keeps SQL out of both the workflow and presentation layers. A session ID is generated for each new
+conversation and passed explicitly into one orchestration run. Successful terminal responses are
+stored as user/King exchange pairs with accumulated provider token usage; failed or cancelled runs are
+not stored.
 
-Before a run, the engine loads up to six recent exchanges across sessions in chronological order and
-injects them only into King calls. The block is explicitly labelled untrusted historical data so it
-cannot override system, skill, action-schema, or tool-permission instructions. Retrieval is recency
-based rather than semantic in this version: it is deterministic, dependency-light, and easy to
-explain, with a 24 KiB prompt ceiling. Database failures produce warning events while orchestration
+Before a run, the engine loads the active session's summary and uncompacted exchanges in chronological
+order and injects them only into King calls. The block is explicitly labelled untrusted historical
+data so it cannot override system, skill, action-schema, or tool-permission instructions. Retrieval is
+session-scoped and deterministic, with a 96 KiB prompt ceiling. Database failures produce warning events while orchestration
 continues. Store initialization and unsupported schema versions fail at startup because silently
 using an unknown database format would risk corrupting user data.
 
-The `/memory` browser loads session summaries and selected exchanges asynchronously. Each request carries
-a monotonically increasing generation, so a late result cannot replace the user's current selection.
-Session deletion cascades to its exchanges and requires an explicit confirmation in the TUI.
+The `/sessions` browser loads one-line previews, usage/context summaries, and selected exchanges
+asynchronously. Each request carries a monotonically increasing generation, so a late result cannot
+replace the user's current selection. `Enter` resumes a transcript under its existing session ID;
+`/new` replaces the active ID and clears only the visible transcript. `/compact` asks the prepared King
+model to summarize all but the two most recent uncompacted exchanges. SQLite stores the summary
+boundary and compaction token usage while retaining every raw exchange. Session deletion cascades to
+its exchanges and requires an explicit confirmation in the TUI.
 
 Local runtime management extends discovery rather than replacing it. `internal/localmodels` owns a
 provider-neutral manager and two adapters. The adapters use an injected system boundary for

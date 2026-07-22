@@ -4,8 +4,8 @@ Status: accepted
 
 ## Decision
 
-Keep the ready screen centred on conversation and expose four prompt commands: `/setup`, `/models`,
-`/memory`, and `/skills`. The wide layout places deduplicated model activity beside the conversation;
+Keep the ready screen centred on conversation and expose focused prompt commands: `/setup`, `/models`,
+`/sessions`, `/new`, `/compact`, and `/skills`. The wide layout places deduplicated model activity beside the conversation;
 the narrow layout stacks it below. Royal styling identifies the product but does not compete with the
 user's prompt and response.
 

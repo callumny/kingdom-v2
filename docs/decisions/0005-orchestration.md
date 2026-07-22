@@ -20,7 +20,7 @@ The ready screen is a responsive multiline chat backed by an injected
 concise progress rendering, and accumulated per-model throughput; orchestration and HTTP remain in their
 respective packages. Each submission receives a value snapshot of the latest
 saved config, so setup changes cannot leak into an active run. `Ctrl+Enter`
-submits, `Esc` cancels a run, and `Ctrl+C` cancels then exits. `/setup`, `/models`, `/memory`, and
-`/skills` are the visible navigation commands. Ordinary letters (including `q`) are prompt text on the
+submits, `Esc` cancels a run, and `Ctrl+C` cancels then exits. `/setup`, `/models`, `/sessions`,
+`/new`, `/compact`, and `/skills` are the visible commands. Ordinary letters (including `q`) are prompt text on the
 ready screen. In setup, `q` quits ordinary screens but remains text inside the
 focused custom-endpoint form.
