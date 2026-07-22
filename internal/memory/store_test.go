@@ -118,7 +118,7 @@ func TestCompactSessionKeepsRawTranscriptButReducesFutureContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CompactSession(ctx, "session-a", "Earlier discussion covered the first two topics.", raw[1].ID); err != nil {
+	if err := store.CompactSession(ctx, "session-a", "Earlier discussion covered the first two topics.", raw[1].ID, Usage{PromptTokens: 20, CompletionTokens: 5}); err != nil {
 		t.Fatal(err)
 	}
 	contextView, err := store.SessionContext(ctx, "session-a", 10)
@@ -131,6 +131,10 @@ func TestCompactSessionKeepsRawTranscriptButReducesFutureContext(t *testing.T) {
 	raw, err = store.SessionExchanges(ctx, "session-a", 10)
 	if err != nil || len(raw) != 3 {
 		t.Fatalf("raw transcript=%+v err=%v", raw, err)
+	}
+	sessions, err := store.ListSessions(ctx, 1)
+	if err != nil || len(sessions) != 1 || sessions[0].TotalTokens != 70 {
+		t.Fatalf("session usage=%+v err=%v", sessions, err)
 	}
 }
 

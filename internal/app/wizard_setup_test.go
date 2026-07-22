@@ -185,7 +185,7 @@ func TestSlashWizardReopensConfiguredSetupWithoutRunningAPrompt(t *testing.T) {
 	chat := &appWizardClient{}
 	runs := 0
 	m := NewWithServices(cfg, Services{
-		Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event {
+		Run: func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event {
 			runs++
 			return nil
 		},

@@ -72,7 +72,7 @@ func TestChatViewUsesFocusedCommandsAndModelActivitySidebar(t *testing.T) {
 			{Provider: "Ollama", Model: "llama3.1:8b", Roles: "Workers"},
 		},
 	}).Content
-	for _, want := range []string{"♛ KINGDOM", "Conversation", "Model activity", "Ornith-1.0-9B-6bit", "King, Council", "llama3.1:8b", "Workers", "— tok/s", "/setup Setup", "/models Models", "/memory Memory", "/skills Skills"} {
+	for _, want := range []string{"♛ KINGDOM", "Conversation", "Model activity", "Ornith-1.0-9B-6bit", "King, Council", "llama3.1:8b", "Workers", "— tok/s", "/setup Setup", "/models Models", "/sessions Sessions", "/new New", "/compact Compact", "/skills Skills"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("main view missing %q: %s", want, view)
 		}

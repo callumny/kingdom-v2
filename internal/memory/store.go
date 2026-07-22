@@ -199,11 +199,14 @@ func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) 
 		SELECT s.id, s.started_at, s.updated_at, COUNT(e.id),
 			s.summary_text,
 			COALESCE((SELECT first.user_text FROM exchanges first WHERE first.session_id = s.id ORDER BY first.id ASC LIMIT 1), ''),
-			COALESCE(SUM(e.prompt_tokens + e.completion_tokens), 0),
-			COALESCE(SUM(CASE WHEN e.id IS NOT NULL AND e.prompt_tokens = 0 AND e.completion_tokens = 0 THEN LENGTH(e.user_text) + LENGTH(e.reply_text) ELSE 0 END), 0),
+			s.prompt_tokens + s.completion_tokens + COALESCE(SUM(e.prompt_tokens + e.completion_tokens), 0),
+			COALESCE(SUM(
+				CASE WHEN e.id IS NOT NULL AND e.prompt_tokens = 0 THEN LENGTH(e.user_text) ELSE 0 END +
+				CASE WHEN e.id IS NOT NULL AND e.completion_tokens = 0 THEN LENGTH(e.reply_text) ELSE 0 END
+			), 0),
 			COALESCE(SUM(CASE WHEN e.id > s.compacted_through_id THEN LENGTH(e.user_text) + LENGTH(e.reply_text) ELSE 0 END), 0)
 		FROM sessions s LEFT JOIN exchanges e ON e.session_id = s.id
-		GROUP BY s.id, s.started_at, s.updated_at, s.summary_text, s.compacted_through_id
+		GROUP BY s.id, s.started_at, s.updated_at, s.summary_text, s.compacted_through_id, s.prompt_tokens, s.completion_tokens
 		ORDER BY s.updated_at DESC, s.id ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list memory sessions: %w", err)
@@ -260,7 +263,7 @@ func (s *Store) SessionContext(ctx context.Context, sessionID string, limit int)
 	return result, err
 }
 
-func (s *Store) CompactSession(ctx context.Context, sessionID, summary string, throughExchangeID int64) error {
+func (s *Store) CompactSession(ctx context.Context, sessionID, summary string, throughExchangeID int64, usage Usage) error {
 	sessionID = strings.TrimSpace(sessionID)
 	summary = strings.TrimSpace(summary)
 	if sessionID == "" || summary == "" || throughExchangeID < 1 {
@@ -269,12 +272,16 @@ func (s *Store) CompactSession(ctx context.Context, sessionID, summary string, t
 	if !utf8.ValidString(summary) {
 		return errors.New("summary must be valid UTF-8")
 	}
+	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 {
+		return errors.New("token usage cannot be negative")
+	}
 	summary, _ = truncateUTF8(summary, MaxSummaryBytes)
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE sessions SET summary_text = ?, compacted_through_id = ?, updated_at = ?
+		UPDATE sessions SET summary_text = ?, compacted_through_id = ?, updated_at = ?,
+			prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?
 		WHERE id = ? AND EXISTS (
 			SELECT 1 FROM exchanges WHERE id = ? AND session_id = sessions.id
-		)`, summary, throughExchangeID, s.now().UTC().Format(timestampLayout), sessionID, throughExchangeID)
+		)`, summary, throughExchangeID, s.now().UTC().Format(timestampLayout), usage.PromptTokens, usage.CompletionTokens, sessionID, throughExchangeID)
 	if err != nil {
 		return fmt.Errorf("compact session: %w", err)
 	}
@@ -400,7 +407,9 @@ func (s *Store) migrate() error {
 			started_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			summary_text TEXT NOT NULL DEFAULT '',
-			compacted_through_id INTEGER NOT NULL DEFAULT 0
+			compacted_through_id INTEGER NOT NULL DEFAULT 0,
+			prompt_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_tokens INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE exchanges (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,6 +427,8 @@ func (s *Store) migrate() error {
 		statements = []string{
 			`ALTER TABLE sessions ADD COLUMN summary_text TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE sessions ADD COLUMN compacted_through_id INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE sessions ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE sessions ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`,
 			`ALTER TABLE exchanges ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`,
 			`ALTER TABLE exchanges ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`,
 			fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion),

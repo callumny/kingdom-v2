@@ -34,7 +34,7 @@ func TestReadyQTypesButSetupQQuits(t *testing.T) {
 
 func TestBlankSubmitDoesNotRun(t *testing.T) {
 	runs := 0
-	m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event {
+	m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event {
 		runs++
 		return nil
 	}})
@@ -45,10 +45,11 @@ func TestBlankSubmitDoesNotRun(t *testing.T) {
 }
 
 func TestSubmitCapturesAndClearsPrompt(t *testing.T) {
-	called := make(chan string, 1)
+	called := make(chan string, 2)
 	ch := make(chan orchestration.Event, 1)
 	ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
-	m := NewWithServices(completeConfig(), Services{Run: func(_ context.Context, _ config.Config, p string, _ []skills.Skill) <-chan orchestration.Event {
+	m := NewWithServices(completeConfig(), Services{NewSessionID: func() (string, error) { return "session-one", nil }, Run: func(_ context.Context, _ config.Config, sessionID, p string, _ []skills.Skill) <-chan orchestration.Event {
+		called <- sessionID
 		called <- p
 		return ch
 	}})
@@ -58,8 +59,8 @@ func TestSubmitCapturesAndClearsPrompt(t *testing.T) {
 	if m.chat.Value() != "" {
 		t.Fatalf("prompt not cleared: %q", m.chat.Value())
 	}
-	if cmd == nil || <-called != "hello" {
-		t.Fatal("run did not capture prompt")
+	if cmd == nil || <-called != "session-one" || <-called != "hello" {
+		t.Fatal("run did not capture session and prompt")
 	}
 }
 
@@ -67,7 +68,9 @@ func TestProgressEventsAndCompletion(t *testing.T) {
 	ch := make(chan orchestration.Event, 2)
 	ch <- orchestration.Event{Type: orchestration.EventStarted}
 	ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "done"}}
-	m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event { return ch }})
+	m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event {
+		return ch
+	}})
 	m.chat.SetValue("x")
 	n, cmd := m.Update(key("ctrl+enter"))
 	m = n.(Model)
@@ -107,7 +110,9 @@ func TestFailureAndUnexpectedClose(t *testing.T) {
 		close(c)
 		return c
 	}(), func() <-chan orchestration.Event { c := make(chan orchestration.Event); close(c); return c }()} {
-		m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event { return stream }})
+		m := NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event {
+			return stream
+		}})
 		m.chat.SetValue("x")
 		n, cmd := m.Update(key("ctrl+enter"))
 		m = n.(Model)
@@ -175,15 +180,15 @@ func TestControlSReopensSetupWhenIdle(t *testing.T) {
 	}
 }
 
-func TestReadySlashCommandsOpenSetupMemoryAndSkills(t *testing.T) {
+func TestReadySlashCommandsOpenSetupSessionsAndSkills(t *testing.T) {
 	library := &fakeSkillLibrary{skills: []skills.Skill{{Name: "careful-coder"}}}
 	store := &fakeMemoryBrowser{}
 
 	m := NewWithServices(completeConfig(), Services{Skills: library, Memory: store})
-	m.chat.SetValue("/memory")
+	m.chat.SetValue("/sessions")
 	m, command := update(m, key("ctrl+enter"))
 	if !m.memory.open || command == nil || m.chat.Value() != "" {
-		t.Fatalf("/memory did not open browser: open=%v command=%v input=%q", m.memory.open, command, m.chat.Value())
+		t.Fatalf("/sessions did not open browser: open=%v command=%v input=%q", m.memory.open, command, m.chat.Value())
 	}
 
 	m = NewWithServices(completeConfig(), Services{Skills: library, Memory: store})
@@ -226,7 +231,9 @@ func TestNilRunOrNilStreamFailsCleanly(t *testing.T) {
 	if m.chatError == "" || m.chat.Value() != "x" {
 		t.Fatal("nil run not reported")
 	}
-	m = NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event { return nil }})
+	m = NewWithServices(completeConfig(), Services{Run: func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event {
+		return nil
+	}})
 	m.chat.SetValue("x")
 	m, _ = update(m, key("ctrl+enter"))
 	if m.chatError == "" || m.chat.Value() != "x" {
@@ -236,7 +243,7 @@ func TestNilRunOrNilStreamFailsCleanly(t *testing.T) {
 func TestRunUsesLatestSavedConfig(t *testing.T) {
 	c := completeConfig()
 	var got config.Config
-	m := NewWithServices(c, Services{Run: func(_ context.Context, cfg config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+	m := NewWithServices(c, Services{Run: func(_ context.Context, cfg config.Config, _ string, _ string, _ []skills.Skill) <-chan orchestration.Event {
 		got = cfg
 		return nil
 	}})
@@ -256,7 +263,7 @@ func TestRunPreparationTransformsRuntimeConfig(t *testing.T) {
 			next.Topology.Roles.King.Model = "runtime-king"
 			return next, nil
 		},
-		Run: func(_ context.Context, next config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+		Run: func(_ context.Context, next config.Config, _ string, _ string, _ []skills.Skill) <-chan orchestration.Event {
 			prepared <- next
 			ch := make(chan orchestration.Event, 1)
 			ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
@@ -300,7 +307,7 @@ func TestFirstRunReusesTheCompletedWizardWarmup(t *testing.T) {
 			prepareCalls++
 			return config.Config{}, errors.New("should not prepare twice")
 		},
-		Run: func(_ context.Context, next config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+		Run: func(_ context.Context, next config.Config, _ string, _ string, _ []skills.Skill) <-chan orchestration.Event {
 			used <- next
 			ch := make(chan orchestration.Event, 1)
 			ch <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
@@ -332,7 +339,7 @@ func TestFailedWizardWarmupFallsBackToNormalPreparation(t *testing.T) {
 			prepareCalls++
 			return next, nil
 		},
-		Run: func(_ context.Context, _ config.Config, _ string, _ []skills.Skill) <-chan orchestration.Event {
+		Run: func(_ context.Context, _ config.Config, _ string, _ string, _ []skills.Skill) <-chan orchestration.Event {
 			stream := make(chan orchestration.Event, 1)
 			stream <- orchestration.Event{Type: orchestration.EventCompleted, Result: &orchestration.Result{Content: "ok"}}
 			close(stream)
@@ -341,7 +348,7 @@ func TestFailedWizardWarmupFallsBackToNormalPreparation(t *testing.T) {
 	})
 	m.runtimeWarm = warmed
 	m.runtimeWarmSignature = configSignature(cfg)
-	stream := m.startRunStream(context.Background(), cfg, "hello", nil)
+	stream := m.startRunStream(context.Background(), cfg, "session", "hello", nil)
 	first := <-stream
 	if first.Type != orchestration.EventRuntimePreparing {
 		t.Fatalf("first event=%v", first.Type)
@@ -359,7 +366,7 @@ func TestRunPreparationFailureDoesNotStartOrchestration(t *testing.T) {
 		PrepareRun: func(context.Context, config.Config) (config.Config, error) {
 			return config.Config{}, errors.New("could not start Ollama")
 		},
-		Run: func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event {
+		Run: func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event {
 			runs++
 			return nil
 		},
@@ -422,7 +429,7 @@ func TestChatIntegrationDelegatesWorkersCouncilAndKing(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := modelapi.NewClient()
-	m := NewWithServices(cfg, Services{Run: func(ctx context.Context, c config.Config, p string, _ []skills.Skill) <-chan orchestration.Event {
+	m := NewWithServices(cfg, Services{Run: func(ctx context.Context, c config.Config, _ string, p string, _ []skills.Skill) <-chan orchestration.Event {
 		return orchestration.NewEngine(c, client).Stream(ctx, p)
 	}})
 	m.chat.SetValue("hello")

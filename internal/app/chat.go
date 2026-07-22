@@ -17,9 +17,9 @@ type chatEventMsg struct {
 	Event      orchestration.Event
 }
 
-func (m Model) startRunStream(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
+func (m Model) startRunStream(ctx context.Context, cfg config.Config, sessionID, prompt string, active []skills.Skill) <-chan orchestration.Event {
 	if m.prepareRun == nil {
-		return m.run(ctx, cfg, prompt, active)
+		return m.run(ctx, cfg, sessionID, prompt, active)
 	}
 	out := make(chan orchestration.Event)
 	go func() {
@@ -44,7 +44,7 @@ func (m Model) startRunStream(ctx context.Context, cfg config.Config, prompt str
 				return
 			}
 		}
-		stream := m.run(ctx, runtimeConfig, prompt, active)
+		stream := m.run(ctx, runtimeConfig, sessionID, prompt, active)
 		if stream == nil {
 			emit(orchestration.Event{Type: orchestration.EventFailed, Message: "orchestration stream unavailable"})
 			return

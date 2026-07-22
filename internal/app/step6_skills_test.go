@@ -77,7 +77,7 @@ func TestActiveSkillsAreSnapshottedForRun(t *testing.T) {
 	var received []skills.Skill
 	services := Services{
 		Skills: library,
-		Run: func(_ context.Context, _ config.Config, _ string, active []skills.Skill) <-chan orchestration.Event {
+		Run: func(_ context.Context, _ config.Config, _ string, _ string, active []skills.Skill) <-chan orchestration.Event {
 			received = append([]skills.Skill(nil), active...)
 			return nil
 		},
@@ -152,7 +152,7 @@ func TestSkillIntegrationLoadsActivatesAndReachesLocalKing(t *testing.T) {
 	client := modelapi.NewClient()
 	m := NewWithServices(configuration, Services{
 		Skills: library,
-		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
+		Run: func(ctx context.Context, cfg config.Config, _ string, prompt string, active []skills.Skill) <-chan orchestration.Event {
 			return orchestration.NewEngine(cfg, client, orchestration.WithSkills(active)).Stream(ctx, prompt)
 		},
 	})

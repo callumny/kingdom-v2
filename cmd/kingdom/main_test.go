@@ -4,13 +4,48 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/callumny/kingdom/internal/config"
 	"github.com/callumny/kingdom/internal/localmodels"
+	"github.com/callumny/kingdom/internal/memory"
+	"github.com/callumny/kingdom/internal/modelapi"
 	"github.com/callumny/kingdom/internal/setup"
 	"github.com/callumny/kingdom/internal/topology"
 )
+
+type compactClient struct {
+	messages  []modelapi.Message
+	maxTokens int
+}
+
+func (c *compactClient) Complete(_ context.Context, _ topology.Endpoint, _ string, messages []modelapi.Message, maxTokens int) (modelapi.Completion, error) {
+	c.messages = append([]modelapi.Message(nil), messages...)
+	c.maxTokens = maxTokens
+	return modelapi.Completion{Content: "A concise session summary.", PromptTokens: 80, CompletionTokens: 20}, nil
+}
+
+func TestCompactSessionUsesPreparedKingAndReturnsMeasuredUsage(t *testing.T) {
+	configuration := managedRuntimeConfig(config.OllamaSharedPort)
+	client := &compactClient{}
+	summary, usage, err := compactSession(context.Background(), configuration, memory.Context{
+		Summary:   "An earlier summary.",
+		Exchanges: []memory.Exchange{{User: "Choose a layout", Reply: "Use two columns."}},
+	}, func(_ context.Context, next config.Config) (config.Config, error) {
+		return next, nil
+	}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, message := range client.messages {
+		joined += message.Content
+	}
+	if summary != "A concise session summary." || usage != (memory.Usage{PromptTokens: 80, CompletionTokens: 20}) || client.maxTokens != 1024 || !strings.Contains(joined, "An earlier summary") || !strings.Contains(joined, "Choose a layout") {
+		t.Fatalf("summary=%q usage=%+v max=%d messages=%+v", summary, usage, client.maxTokens, client.messages)
+	}
+}
 
 func TestPrepareRuntimeConfigStartsPlannedEndpoints(t *testing.T) {
 	cfg := managedRuntimeConfig(config.OllamaDedicatedPorts)

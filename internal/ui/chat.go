@@ -67,7 +67,8 @@ func ChatViewWithPresentation(width, height int, p ChatPresentation) tea.View {
 	rule := royalRule.Render(strings.Repeat("─", contentWidth))
 	footer := []string{
 		royalMuted.Render("Ctrl+Enter Send  •  /setup Setup  •  /models Models"),
-		royalMuted.Render("/memory Memory  •  /skills Skills  •  Ctrl+C Quit"),
+		royalMuted.Render("/sessions Sessions  •  /new New  •  /compact Compact"),
+		royalMuted.Render("/skills Skills  •  Ctrl+C Quit"),
 	}
 	inputLines := strings.Split(p.Input.View(), "\n")
 	fixed := 2 + 1 + len(inputLines) + 1 + len(footer)

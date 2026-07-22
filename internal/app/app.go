@@ -41,6 +41,12 @@ type Model struct {
 	progress                string
 	chatError               string
 	run                     RunFunc
+	sessionID               string
+	newSessionID            func() (string, error)
+	compact                 SessionCompactor
+	compacting              bool
+	compactGeneration       uint64
+	compactCancel           context.CancelFunc
 	prepareRun              PrepareRunFunc
 	warmRun                 PrepareRunFunc
 	runtimeWarm             <-chan runtimeWarmResult
@@ -118,15 +124,18 @@ type modelMetric struct {
 	generationDuration time.Duration
 }
 type DiscoverFunc func(context.Context, uint64, []topology.Endpoint) tea.Cmd
-type RunFunc func(context.Context, config.Config, string, []skills.Skill) <-chan orchestration.Event
+type RunFunc func(context.Context, config.Config, string, string, []skills.Skill) <-chan orchestration.Event
 type PrepareRunFunc func(context.Context, config.Config) (config.Config, error)
 type WizardPrepareFunc func(context.Context, config.Config, setup.ModelOption) (setup.ModelOption, error)
+type SessionCompactor func(context.Context, config.Config, memory.Context) (string, memory.Usage, error)
 
 type Services struct {
 	Defaults      []topology.Endpoint
 	Discover      DiscoverFunc
 	Save          func(config.Config) error
 	Run           RunFunc
+	NewSessionID  func() (string, error)
+	Compact       SessionCompactor
 	PrepareRun    PrepareRunFunc
 	WarmRun       PrepareRunFunc
 	Skills        SkillLibrary
@@ -222,6 +231,11 @@ func NewWithDepsAndSave(c config.Config, defaults []topology.Endpoint, discover 
 }
 func NewWithServices(c config.Config, services Services) Model {
 	w := setup.Start(c, services.Defaults)
+	newSessionID := services.NewSessionID
+	if newSessionID == nil {
+		newSessionID = memory.NewSessionID
+	}
+	sessionID, sessionErr := newSessionID()
 	model := Model{
 		config:          c,
 		setup:           c.RequiresSetup(),
@@ -229,6 +243,9 @@ func NewWithServices(c config.Config, services Services) Model {
 		discover:        services.Discover,
 		save:            services.Save,
 		run:             services.Run,
+		sessionID:       sessionID,
+		newSessionID:    newSessionID,
+		compact:         services.Compact,
 		prepareRun:      services.PrepareRun,
 		warmRun:         services.WarmRun,
 		skills:          skillState{library: services.Skills},
@@ -246,6 +263,9 @@ func NewWithServices(c config.Config, services Services) Model {
 		chat:            ui.NewChatInput(),
 		modelMetrics:    make(map[string]modelMetric),
 		wizardInput:     ui.NewChatInput(),
+	}
+	if sessionErr != nil {
+		model.chatError = "start session: " + sessionErr.Error()
 	}
 	if model.setup && model.screen == setup.StateProviders && services.Discover != nil {
 		model.scanning = true
@@ -588,7 +608,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.memory.err = "session no longer exists"
 			return m, nil
 		}
+		if x.sessionID == m.sessionID {
+			sessionID, err := m.newSessionID()
+			if err != nil {
+				m.memory.err = "start replacement session: " + err.Error()
+				return m, nil
+			}
+			m.sessionID = sessionID
+			m.history = nil
+			m.progress = "New session started"
+		}
 		return m, m.loadMemorySessions()
+	case sessionCompactedMsg:
+		if x.generation != m.compactGeneration {
+			return m, nil
+		}
+		m.compacting = false
+		m.compactCancel = nil
+		if x.err != nil {
+			m.chatError = x.err.Error()
+			m.progress = ""
+			return m, nil
+		}
+		m.chatError = ""
+		m.progress = "Session compacted"
+		if m.memory.open {
+			return m, m.loadMemorySessions()
+		}
 	case chatEventMsg:
 		if x.Generation != m.runGen || !m.running {
 			return m, nil
@@ -673,6 +719,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		key := x.String()
 		if key == "ctrl+c" {
+			if m.compactCancel != nil {
+				m.compactCancel()
+			}
 			if m.localModels.cancel != nil {
 				m.localModels.cancel()
 			}
@@ -694,6 +743,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.cancelWizardWarmup()
 			return m, tea.Quit
+		}
+		if m.compacting {
+			if key == "esc" && m.compactCancel != nil {
+				m.compactCancel()
+				m.compactGeneration++
+				m.compacting = false
+				m.compactCancel = nil
+				m.progress = "Compaction cancelled"
+			}
+			return m, nil
 		}
 		if m.skills.open {
 			return m.handleSkillsKey(key), nil
@@ -812,13 +871,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "/models":
 					m.chat.SetValue("")
 					return m.reopenModels()
-				case "/memory":
+				case "/sessions", "/memory":
 					m.chat.SetValue("")
 					if m.memory.store == nil {
 						m.chatError = "memory is unavailable"
 						return m, nil
 					}
 					return m, m.openMemory()
+				case "/new":
+					m.chat.SetValue("")
+					return m.startNewSession()
+				case "/compact":
+					m.chat.SetValue("")
+					return m.startSessionCompaction(m.sessionID)
 				case "/skills":
 					m.chat.SetValue("")
 					if m.skills.library == nil {
@@ -837,7 +902,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.running = true
 					m.runGen++
 					active := append([]skills.Skill(nil), m.skills.active...)
-					m.runCh = m.startRunStream(ctx, m.config, p, active)
+					m.runCh = m.startRunStream(ctx, m.config, m.sessionID, p, active)
 					if m.runCh == nil {
 						m.running = false
 						m.runCancel = nil

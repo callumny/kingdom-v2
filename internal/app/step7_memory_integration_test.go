@@ -53,9 +53,10 @@ func TestConversationPersistsRecallsAndBrowsesThroughTUI(t *testing.T) {
 	configuration.Topology.Roles.Worker = topology.Assignment{EndpointID: "local", Model: "worker"}
 	client := modelapi.NewClient()
 	m := NewWithServices(configuration, Services{
-		Memory: store,
-		Run: func(ctx context.Context, cfg config.Config, prompt string, _ []skills.Skill) <-chan orchestration.Event {
-			return orchestration.NewEngine(cfg, client, orchestration.WithMemory(store, "integration-session", 6)).Stream(ctx, prompt)
+		Memory:       store,
+		NewSessionID: func() (string, error) { return "integration-session", nil },
+		Run: func(ctx context.Context, cfg config.Config, sessionID string, prompt string, _ []skills.Skill) <-chan orchestration.Event {
+			return orchestration.NewEngine(cfg, client, orchestration.WithMemory(store, sessionID, 100)).Stream(ctx, prompt)
 		},
 	})
 
@@ -73,7 +74,7 @@ func TestConversationPersistsRecallsAndBrowsesThroughTUI(t *testing.T) {
 	m, command = update(m, command())
 	m, _ = update(m, command())
 	view := m.View().Content
-	if !strings.Contains(view, "integration-session") || !strings.Contains(view, "what is my colour?") || !strings.Contains(view, "your colour is blue") {
+	if !strings.Contains(view, "my colour is blue") || !strings.Contains(view, "what is my colour?") || !strings.Contains(view, "your colour is blue") {
 		t.Fatalf("persisted conversation missing from browser: %s", view)
 	}
 }
