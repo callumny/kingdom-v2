@@ -16,6 +16,7 @@ import (
 )
 
 const maxWizardToolCalls = 10
+const maxWizardCorrections = 2
 
 type Reply struct {
 	Content  string
@@ -63,6 +64,8 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 	}
 	e.history = append(e.history, modelapi.Message{Role: "user", Content: strings.TrimSpace(userMessage)})
 	malformed := 0
+	corrections := 0
+	completedTools := make(map[string]bool)
 	for toolCalls := 0; toolCalls < maxWizardToolCalls; {
 		if err := ctx.Err(); err != nil {
 			return Reply{}, err
@@ -86,15 +89,77 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 		e.history = append(e.history, modelapi.Message{Role: "assistant", Content: raw})
 		switch action.Type {
 		case "message":
+			missing := missingExplicitTools(userMessage, completedTools)
+			if len(missing) > 0 {
+				if corrections >= maxWizardCorrections {
+					return Reply{}, fmt.Errorf("Wizard did not complete requested setting(s): %s", strings.Join(missing, ", "))
+				}
+				corrections++
+				e.history = append(e.history, modelapi.Message{Role: "user", Content: "That summary is premature. The original request explicitly requires these successful tools: " + strings.Join(missing, ", ") + ". Continue with those changes before summarizing."})
+				continue
+			}
 			return Reply{Content: action.Content, Ready: action.Ready}, nil
 		case "tool":
 			toolCalls++
 			result := e.session.Run(ctx, tools.Call{ID: fmt.Sprintf("wizard-%d", toolCalls), Name: action.Name, Arguments: action.Arguments})
+			if result.Error == "" {
+				completedTools[action.Name] = true
+			}
 			encoded, _ := json.Marshal(result)
-			e.history = append(e.history, modelapi.Message{Role: "user", Content: "Wizard tool result: " + string(encoded)})
+			e.history = append(e.history, modelapi.Message{Role: "user", Content: "Wizard tool result: " + string(encoded) +
+				"\nOriginal request: " + strings.TrimSpace(userMessage) +
+				"\nContinue with every requested change that has not succeeded yet. Only summarize after every part of the original request is complete."})
 		}
 	}
 	return Reply{}, errors.New("Wizard tool limit reached")
+}
+
+func missingExplicitTools(request string, completed map[string]bool) []string {
+	normalized := strings.ToLower(strings.TrimSpace(request))
+	if hasAnyPrefix(normalized, "should ", "why ", "how ", "what ", "when ", "do i ", "does ", "is ", "are ") || containsAny(normalized, "explain", "recommend", "advise") {
+		return nil
+	}
+	required := make([]string, 0, 5)
+	if strings.Contains(normalized, "council") && containsAny(normalized, "enable", "disable", "turn on", "turn off", "without", "remove") {
+		required = append(required, "enable_council")
+	}
+	if strings.Contains(normalized, "council") && containsAny(normalized, "member", "reviewer", "council size", "how many") {
+		required = append(required, "set_council_size")
+	}
+	if strings.Contains(normalized, "worker concurrency") || strings.Contains(normalized, "concurrent worker") || strings.Contains(normalized, "workers") {
+		required = append(required, "set_worker_concurrency")
+	}
+	if strings.Contains(normalized, "ollama") && containsAny(normalized, "shared", "separate") {
+		required = append(required, "set_ollama_server_mode")
+	}
+	if strings.Contains(normalized, "port") && containsAny(normalized, "ollama", "mlx") {
+		required = append(required, "set_provider_port")
+	}
+	missing := make([]string, 0, len(required))
+	for _, name := range required {
+		if !completed[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyPrefix(value string, prefixes ...string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) validate() error {
@@ -120,7 +185,7 @@ func (e *Engine) systemPrompt(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return `You are Kingdom's concise setup-only Wizard. Help the user configure only the selected local models.
-The draft already contains sensible defaults. Prefer explaining them in one short response. If the user asks for a change, call one small tool at a time, inspect the result, then summarize.
+The draft already contains sensible defaults. Prefer explaining them in one short response. If the user asks for changes, make a private checklist of every requested change. Call one small tool at a time, inspect each result, and complete the whole checklist before summarizing.
 You have no shell, files, memory, provider installation, or normal Kingdom tools. Never claim a setting changed unless its tool succeeded.
 Return exactly one JSON object and no markdown:
 {"type":"tool","name":"tool_name","arguments":{...}}

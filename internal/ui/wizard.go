@@ -8,7 +8,7 @@ import (
 	"github.com/callumny/kingdom/internal/setup"
 )
 
-func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
+func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]string, string) {
 	body := []string{
 		royalBrand.Render("Wizard"),
 		royalMuted.Render("A short conversation to finish your Kingdom."),
@@ -22,11 +22,11 @@ func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	}
 	start := max(0, len(p.WizardMessages)-4)
 	for _, message := range p.WizardMessages[start:] {
+		style := royalCyan
 		if strings.HasPrefix(message, "You: ") {
-			body = append(body, royalText.Render(message))
-		} else {
-			body = append(body, royalCyan.Render(message))
+			style = royalText
 		}
+		body = append(body, styledParagraph(message, contentWidth, style)...)
 	}
 	body = append(body, "", royalGold.Render("Proposed Kingdom"))
 	roles := wf.Draft.Config.Topology.Roles

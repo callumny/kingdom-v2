@@ -58,7 +58,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			body, footer = modelsSetupView(wf, p)
 		case setup.StateWizard:
 			progress = setupProgress(3)
-			body, footer = wizardSetupView(wf, p)
+			body, footer = wizardSetupView(wf, p, royalContentWidth(width))
 		case setup.StateRoles:
 			progress = setupProgress(3)
 			body, footer = rolesSetupView(wf, p)

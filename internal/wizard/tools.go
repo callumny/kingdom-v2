@@ -28,7 +28,7 @@ type ToolDefinition struct {
 func ToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
 		{Name: "inspect_setup", Description: "List selected models by number and show current settings.", Parameters: schema(`{"type":"object","additionalProperties":false}`)},
-		{Name: "enable_council", Description: "Enable or disable the optional Council.", Parameters: schema(`{"type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}`)},
+		{Name: "enable_council", Description: "Enable or disable the optional Council. Enabling reuses the proposed King model when no Council model is assigned.", Parameters: schema(`{"type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}`)},
 		{Name: "assign_model", Description: "Assign one numbered selected model to one role.", Parameters: schema(`{"type":"object","properties":{"role":{"enum":["king","worker","council"]},"model_number":{"type":"integer","minimum":1,"maximum":3}},"required":["role","model_number"],"additionalProperties":false}`)},
 		{Name: "set_council_size", Description: "Set the number of Council reviewers from 1 to 9.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":9}},"required":["count"],"additionalProperties":false}`)},
 		{Name: "set_worker_concurrency", Description: "Set concurrent Workers from 1 to 32.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":32}},"required":["count"],"additionalProperties":false}`)},
@@ -125,7 +125,7 @@ func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 			Enabled bool `json:"enabled"`
 		}
 		if err = decodeArguments(call.Arguments, &arguments); err == nil {
-			s.draft.SetCouncilEnabled(arguments.Enabled)
+			s.setCouncilEnabled(arguments.Enabled)
 		}
 	case "assign_model":
 		var arguments struct {
@@ -199,6 +199,26 @@ func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 	}
 	result.Output = string(encoded)
 	return result
+}
+
+func (s *Session) setCouncilEnabled(enabled bool) {
+	if !enabled {
+		s.draft.SetCouncilEnabled(false)
+		return
+	}
+	selected := s.draft.SelectedModels()
+	roles := s.draft.Config.Topology.Roles
+	if assignmentNumber(roles.Council, selected) > 0 {
+		s.draft.SetCouncilEnabled(true)
+		return
+	}
+	if assignmentNumber(roles.King, selected) > 0 {
+		s.draft.AssignCouncil(roles.King)
+		return
+	}
+	if len(selected) > 0 {
+		s.draft.AssignCouncil(selected[0].Ref.Assignment())
+	}
 }
 
 func (s *Session) apply() error {

@@ -109,6 +109,27 @@ func TestDisablingCouncilClearsItsAssignment(t *testing.T) {
 	}
 }
 
+func TestEnablingCouncilUsesTheProposedKingWhenNoCouncilIsAssigned(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	if draft.Config.CouncilEnabled {
+		t.Fatal("two-model defaults should start without a Council")
+	}
+	session := NewSession(draft)
+	if result := session.Run(context.Background(), call("enable_council", `{"enabled":true}`)); result.Error != "" {
+		t.Fatal(result.Error)
+	}
+	if !draft.Config.CouncilEnabled || draft.Config.Topology.Roles.Council != draft.Config.Topology.Roles.King {
+		t.Fatalf("Council did not reuse proposed King: %+v", draft.Config.Topology.Roles)
+	}
+	preview := session.Run(context.Background(), call("preview_setup", `{}`))
+	if preview.Error != "" || !strings.Contains(preview.Output, `"ready":true`) {
+		t.Fatalf("enabled Council left invalid setup: %+v", preview)
+	}
+}
+
 func TestApplySetupRequiresConfirmationAndValidDraft(t *testing.T) {
 	draft := wizardDraft(t)
 	var saved config.Config

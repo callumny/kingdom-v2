@@ -23,16 +23,7 @@ var (
 )
 
 func renderRoyalShell(width, height int, progress string, body []string, footer string) string {
-	contentWidth := width - 4
-	if width <= 0 {
-		contentWidth = 92
-	}
-	if contentWidth > 96 {
-		contentWidth = 96
-	}
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
+	contentWidth := royalContentWidth(width)
 
 	header := royalBrand.Render("♛ KINGDOM")
 	status := royalMuted.Render("LOCAL · SETUP")
@@ -66,6 +57,20 @@ func renderRoyalShell(width, height int, progress string, body []string, footer 
 	lines := append(append([]string{}, prefix...), body...)
 	lines = append(lines, suffix...)
 	return fitRoyalLines(lines, width, contentWidth)
+}
+
+func royalContentWidth(width int) int {
+	contentWidth := width - 4
+	if width <= 0 {
+		contentWidth = 92
+	}
+	if contentWidth > 96 {
+		contentWidth = 96
+	}
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	return contentWidth
 }
 
 func fitRoyalLines(lines []string, terminalWidth, contentWidth int) string {

@@ -109,6 +109,23 @@ func TestWizardViewMatchesConciseJourney(t *testing.T) {
 	}
 }
 
+func TestWizardViewWrapsLongConversationMessages(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	w.State = setup.StateWizard
+	message := "Wizard: I prepared sensible defaults and selected your Worker model for a fast setup conversation. You can apply them now or ask for one change."
+	view := ansi.Strip(ViewWithPresentation(64, 40, true, w, Presentation{
+		WizardMessages: []string{message},
+		WizardReady:    true,
+	}).Content)
+
+	for _, want := range []string{"fast setup", "conversation.", "ask for one change."} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("wrapped Wizard message missing %q:\n%s", want, view)
+		}
+	}
+	assertViewFits(t, view, 64, 40)
+}
+
 func assertViewFits(t *testing.T, view string, width, height int) {
 	t.Helper()
 	lines := strings.Split(view, "\n")

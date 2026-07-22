@@ -59,6 +59,83 @@ func TestWizardUsesOnePurposeToolsThenExplainsUpdatedDraft(t *testing.T) {
 	}
 }
 
+func TestWizardCarriesTheWholeRequestAcrossToolCalls(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	request := "Could you enable the council and bring the workers down to 2"
+	client := &wizardChatClient{responses: []string{
+		`{"type":"tool","name":"set_worker_concurrency","arguments":{"count":2}}`,
+		`{"type":"tool","name":"enable_council","arguments":{"enabled":true}}`,
+		`{"type":"message","content":"Council enabled and Worker concurrency set to 2.","ready":true}`,
+	}}
+
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), request)
+	if err != nil || !reply.Ready {
+		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	if !draft.Config.CouncilEnabled || !draft.Config.Topology.Roles.Council.Complete() || draft.Config.WorkerConcurrency != 2 {
+		t.Fatalf("multi-part request was not applied: %+v", draft.Config)
+	}
+	if len(client.messages) < 2 {
+		t.Fatalf("messages=%+v", client.messages)
+	}
+	followUp := client.messages[1][len(client.messages[1])-1].Content
+	for _, want := range []string{request, "every requested change"} {
+		if !strings.Contains(followUp, want) {
+			t.Fatalf("tool continuation missing %q: %s", want, followUp)
+		}
+	}
+}
+
+func TestWizardRejectsASummaryThatOmitsAnExplicitRequestedSetting(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	request := "Could you enable the council and bring the workers down to 2"
+	client := &wizardChatClient{responses: []string{
+		`{"type":"tool","name":"set_worker_concurrency","arguments":{"count":2}}`,
+		`{"type":"message","content":"Worker concurrency set to 2.","ready":true}`,
+		`{"type":"tool","name":"enable_council","arguments":{"enabled":true}}`,
+		`{"type":"message","content":"Council enabled and Worker concurrency set to 2.","ready":true}`,
+	}}
+
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), request)
+	if err != nil || !reply.Ready || !strings.Contains(reply.Content, "Council enabled") {
+		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	if !draft.Config.CouncilEnabled || draft.Config.WorkerConcurrency != 2 {
+		t.Fatalf("premature summary lost a requested change: %+v", draft.Config)
+	}
+	if len(client.messages) != 4 {
+		t.Fatalf("model calls=%d, want correction and retry", len(client.messages))
+	}
+	correction := client.messages[2][len(client.messages[2])-1].Content
+	if !strings.Contains(correction, "enable_council") {
+		t.Fatalf("correction did not identify missing setting: %s", correction)
+	}
+}
+
+func TestWizardCanAnswerSetupQuestionsWithoutChangingSettings(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	client := &wizardChatClient{responses: []string{
+		`{"type":"message","content":"A Council adds review, while more Workers increase parallel task capacity.","ready":true}`,
+	}}
+
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), "Should I enable the council if I have several workers?")
+	if err != nil || !reply.Ready || !strings.Contains(reply.Content, "review") {
+		t.Fatalf("question was treated as a change: reply=%+v err=%v", reply, err)
+	}
+	if draft.Config.CouncilEnabled {
+		t.Fatalf("answering a question changed setup: %+v", draft.Config)
+	}
+}
+
 func TestWizardRepairsMalformedControlResponseThenFallsBack(t *testing.T) {
 	draft := wizardDraft(t)
 	client := &wizardChatClient{responses: []string{"not json", "still not json"}}
