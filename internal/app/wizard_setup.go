@@ -146,6 +146,13 @@ func (m *Model) startWizard() {
 }
 
 func (m Model) handleWizardKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
+	if key == "tab" {
+		if m.wizardBusy || m.wizardApplying {
+			m.workflow.Err = fmt.Errorf("wait for the current Wizard action to finish before opening Manual setup")
+			return m, nil
+		}
+		return m.openManualSetup(), nil
+	}
 	if key == "esc" {
 		if m.wizardCancel != nil {
 			m.wizardCancel()
@@ -191,6 +198,41 @@ func (m Model) handleWizardKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	}
 	var command tea.Cmd
 	m.wizardInput, command = m.wizardInput.Update(msg)
+	return m, command
+}
+
+func (m Model) openManualSetup() Model {
+	if m.wizardCancel != nil {
+		m.wizardCancel()
+		m.wizardCancel = nil
+	}
+	m.wizardGeneration++
+	m.wizardBusy = false
+	m.wizardApplying = false
+	m.wizardPreparing = false
+	m.wizardManual = true
+	m.workflow.Err = nil
+	m.workflow.State = setup.StateRoles
+	m.screen = setup.StateRoles
+	m.role = 0
+	m.modelIndex = 0
+	king := m.workflow.Draft.Config.Topology.Roles.King
+	for index, option := range m.workflow.Draft.SelectedModels() {
+		if option.Ref.Assignment() == king {
+			m.modelIndex = index
+			break
+		}
+	}
+	return m
+}
+
+func (m Model) returnToWizardFromManual() (Model, tea.Cmd) {
+	returnToReady := m.wizardReturnToReady
+	m.wizardManual = false
+	m.workflow.State = setup.StateWizard
+	m.screen = setup.StateWizard
+	m, command := m.beginImmediateWizard(returnToReady)
+	m.wizardMessages = []string{"Wizard: Your manual changes are reflected in the Proposed Kingdom below."}
 	return m, command
 }
 

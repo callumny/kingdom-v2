@@ -89,6 +89,7 @@ type Model struct {
 	wizardApplying          bool
 	wizardPreparing         bool
 	wizardReturnToReady     bool
+	wizardManual            bool
 	wizardCancel            context.CancelFunc
 	wizardGeneration        uint64
 	scanning                bool
@@ -463,6 +464,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if x.Err == nil {
 			m.config = x.Config
 			m.setup = false
+			m.wizardManual = false
 			m.screen = setup.StateReady
 			m.workflow.State = setup.StateReady
 			m.workflow.Err = nil
@@ -768,6 +770,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelInventoryLoading = false
 			m.localModels.preferred = nil
 			m.scanning = false
+			if m.screen == setup.StateRoles && m.wizardManual {
+				return m.returnToWizardFromManual()
+			}
 			if m.screen == setup.StateReview || m.screen == setup.StateRoles || m.screen == setup.StatePerformance || m.screen == setup.StateModels || m.screen == setup.StateProviders {
 				m.workflow.Back()
 				m.screen = m.workflow.State
@@ -780,6 +785,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case setup.StateModels:
 			return m.handleModelsKey(key)
 		case setup.StateRoles:
+			if key == "x" {
+				m.workflow.Err = m.workflow.Draft.SwapRoles("king", "worker")
+			}
 			if key == "0" {
 				m.workflow.Draft.SetCouncilEnabled(false)
 			}
@@ -858,6 +866,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.save == nil {
 					m.config = cfg
 					m.setup = false
+					m.wizardManual = false
 					m.screen = setup.StateReady
 					m.workflow.State = setup.StateReady
 					break
@@ -992,5 +1001,6 @@ func (m Model) presentation() ui.Presentation {
 		WizardReady:             m.wizardReady,
 		WizardApplying:          m.wizardApplying,
 		WizardPreparing:         m.wizardPreparing,
+		ManualSetup:             m.wizardManual,
 	}
 }

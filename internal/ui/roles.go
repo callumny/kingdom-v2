@@ -12,7 +12,11 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	if roleName == "" {
 		roleName = "King"
 	}
-	body := []string{royalBrand.Render("Assign models to roles"), ""}
+	title := "Assign models to roles"
+	if p.ManualSetup {
+		title = "Manual setup — assign models to roles"
+	}
+	body := []string{royalBrand.Render(title), ""}
 	body = append(body,
 		roleCard("King", "plans and coordinates; a larger model is usually a good fit."),
 		roleCard("Worker", "handles focused tasks; a smaller model is usually faster."),
@@ -40,7 +44,7 @@ func rolesSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	} else {
 		body = append(body, "Council: "+assignmentLabel(roles.Council, wf))
 	}
-	return body, royalMuted.Render("↑↓ Move   •   Enter Assign   •   n Continue   •   Esc Back")
+	return body, royalMuted.Render("↑↓ Move   •   Enter Assign   •   x Swap King/Worker   •   n Continue   •   Esc Back")
 }
 
 func roleCard(name, description string) string {

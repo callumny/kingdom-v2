@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/callumny/kingdom/internal/config"
@@ -133,6 +134,76 @@ func TestSlashWizardReopensConfiguredSetupWithoutRunningAPrompt(t *testing.T) {
 	m, _ = update(m, key("esc"))
 	if m.setup || m.screen != setup.StateReady {
 		t.Fatalf("Esc did not return to chat: setup=%v screen=%v", m.setup, m.screen)
+	}
+}
+
+func TestWizardTabOpensManualSetupAndEscapeReturns(t *testing.T) {
+	m := wizardAppModel(nil, &appWizardClient{}, nil)
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	m.screen, m.workflow.State = setup.StateWizard, setup.StateWizard
+	m.startWizard()
+
+	m, command := update(m, key("tab"))
+	if command != nil || !m.wizardManual || m.screen != setup.StateRoles || m.workflow.State != setup.StateRoles {
+		t.Fatalf("manual setup did not open: manual=%v screen=%v state=%v command=%v", m.wizardManual, m.screen, m.workflow.State, command)
+	}
+	for _, want := range []string{"Manual setup", "assign models to roles", "Swap King/Worker"} {
+		if !strings.Contains(m.View().Content, want) {
+			t.Fatalf("manual view missing %q: %s", want, m.View().Content)
+		}
+	}
+
+	m, command = update(m, key("esc"))
+	if m.wizardManual || m.screen != setup.StateWizard || m.workflow.State != setup.StateWizard || !strings.Contains(strings.Join(m.wizardMessages, " "), "manual changes") {
+		t.Fatalf("manual setup did not return to Wizard: manual=%v screen=%v state=%v messages=%v command=%v", m.wizardManual, m.screen, m.workflow.State, m.wizardMessages, command)
+	}
+}
+
+func TestManualSetupCanSwapKingAndWorkerWithoutTheModel(t *testing.T) {
+	m := wizardAppModel(nil, &appWizardClient{}, nil)
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	before := m.workflow.Draft.Config.Topology.Roles
+	m.screen, m.workflow.State = setup.StateWizard, setup.StateWizard
+	m.startWizard()
+	m, _ = update(m, key("tab"))
+	m, _ = update(m, key("x"))
+	after := m.workflow.Draft.Config.Topology.Roles
+	if after.King != before.Worker || after.Worker != before.King {
+		t.Fatalf("manual swap failed: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestManualSetupValidatesAndSavesWithoutTheWizardModel(t *testing.T) {
+	var saved config.Config
+	m := wizardAppModel(nil, &appWizardClient{}, func(next config.Config) error {
+		saved = next
+		return nil
+	})
+	if err := m.workflow.Draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	m.screen, m.workflow.State = setup.StateWizard, setup.StateWizard
+	m.startWizard()
+	m, _ = update(m, key("tab"))
+	m, _ = update(m, key("x"))
+	m, _ = update(m, key("n"))
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key("right"))
+	m, _ = update(m, key("enter"))
+	if m.screen != setup.StateReview {
+		t.Fatalf("manual setup did not reach review: %v", m.screen)
+	}
+	m, command := update(m, key("enter"))
+	if command == nil {
+		t.Fatal("manual setup did not start save")
+	}
+	m, _ = update(m, command())
+	if m.setup || m.screen != setup.StateReady || saved.WorkerConcurrency != 5 || saved.Topology.Roles.King.Model != "small" || saved.Topology.Roles.Worker.Model != "large" {
+		t.Fatalf("manual setup not saved: setup=%v screen=%v saved=%+v", m.setup, m.screen, saved)
 	}
 }
 

@@ -214,7 +214,7 @@ func TestProviderFocusDoesNotTypeIntoURL(t *testing.T) {
 
 func TestPerformanceMarkerFollowsFocus(t *testing.T) {
 	p := Presentation{PerfFocus: 1}
-	if !strings.Contains(ViewWithPresentation(80, 20, true, nil, p).Content, "> Worker concurrency") {
+	if !strings.Contains(ViewWithPresentation(80, 20, true, nil, p).Content, "> Concurrent workers") {
 		t.Fatal("worker marker missing")
 	}
 }
@@ -357,7 +357,7 @@ func TestReviewRendersExactDraftSummary(t *testing.T) {
 	w.Draft.Config.Topology.Roles.Worker = topology.Assignment{EndpointID: "worker", Model: "wm"}
 	w.Draft.Config.CouncilEnabled = false
 	s := ViewWithPresentation(80, 40, true, w, Presentation{PreviousEndpoints: []topology.Endpoint{{ID: "offline", Name: "Offline", BaseURL: "o"}}}).Content
-	for _, want := range []string{"King: king/km", "Worker: worker/wm", "Council: disabled", "Council size", "Worker concurrency", "Offline"} {
+	for _, want := range []string{"King: king/km", "Worker: worker/wm", "Council: disabled", "Council size", "Concurrent workers", "Offline"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q", want)
 		}

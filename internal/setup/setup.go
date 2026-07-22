@@ -158,6 +158,34 @@ func (d *Draft) AssignCouncil(a topology.Assignment) {
 	d.Config.Topology.Roles.Council = a
 	d.Config.CouncilEnabled = true
 }
+
+func (d *Draft) SwapRoles(first, second string) error {
+	first = strings.ToLower(strings.TrimSpace(first))
+	second = strings.ToLower(strings.TrimSpace(second))
+	if first == second {
+		return fmt.Errorf("choose two different roles to swap")
+	}
+	roles := &d.Config.Topology.Roles
+	assignments := map[string]*topology.Assignment{
+		"king":    &roles.King,
+		"worker":  &roles.Worker,
+		"council": &roles.Council,
+	}
+	a, firstOK := assignments[first]
+	b, secondOK := assignments[second]
+	if !firstOK || !secondOK {
+		return fmt.Errorf("roles must be king, worker, or council")
+	}
+	if (first == "council" || second == "council") && !d.Config.CouncilEnabled {
+		return fmt.Errorf("enable the Council before swapping its model")
+	}
+	if !a.Complete() || !b.Complete() {
+		return fmt.Errorf("both roles must have assigned models")
+	}
+	*a, *b = *b, *a
+	return nil
+}
+
 func (d *Draft) SetCouncilEnabled(enabled bool) {
 	d.Config.CouncilEnabled = enabled
 	if !enabled {

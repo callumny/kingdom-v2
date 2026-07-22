@@ -317,30 +317,7 @@ func (s *Session) assign(role string, modelNumber int) error {
 }
 
 func (s *Session) swapRoles(first, second string) error {
-	first = strings.ToLower(strings.TrimSpace(first))
-	second = strings.ToLower(strings.TrimSpace(second))
-	if first == second {
-		return errors.New("choose two different roles to swap")
-	}
-	roles := &s.draft.Config.Topology.Roles
-	assignments := map[string]*topology.Assignment{
-		"king":    &roles.King,
-		"worker":  &roles.Worker,
-		"council": &roles.Council,
-	}
-	a, firstOK := assignments[first]
-	b, secondOK := assignments[second]
-	if !firstOK || !secondOK {
-		return errors.New("roles must be king, worker, or council")
-	}
-	if (first == "council" || second == "council") && !s.draft.Config.CouncilEnabled {
-		return errors.New("enable the Council before swapping its model")
-	}
-	if !a.Complete() || !b.Complete() {
-		return errors.New("both roles must have assigned models")
-	}
-	*a, *b = *b, *a
-	return nil
+	return s.draft.SwapRoles(first, second)
 }
 
 func (s *Session) setOllamaMode(mode string) error {

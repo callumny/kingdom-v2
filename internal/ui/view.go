@@ -24,6 +24,7 @@ type Presentation struct {
 	ModelDownloadActive                                      bool
 	ModelDownloadError                                       string
 	WizardBusy, WizardReady, WizardApplying, WizardPreparing bool
+	ManualSetup                                              bool
 	WizardModel, WizardInput                                 string
 	WizardMessages                                           []string
 }
@@ -44,7 +45,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			if p.PerfFocus == 1 {
 				first, second = "  ", "> "
 			}
-			body = append(body, first+"Council size", second+"Worker concurrency")
+			body = append(body, first+"Council size", second+"Concurrent workers")
 		}
 		if wf == nil {
 			return tea.NewView(renderRoyalShell(width, height, progress, body, footer))
@@ -78,7 +79,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 				fmt.Sprintf("Worker: %s/%s", r.Worker.EndpointID, r.Worker.Model),
 				"Council: "+council,
 				fmt.Sprintf("Council size: %d", wf.Draft.Config.CouncilSize),
-				fmt.Sprintf("Worker concurrency: %d", wf.Draft.Config.WorkerConcurrency),
+				fmt.Sprintf("Concurrent workers: %d", wf.Draft.Config.WorkerConcurrency),
 			)
 			body = append(body, reviewOllamaSummary(wf.Draft.Config)...)
 			for _, e := range wf.Draft.PersistenceEndpoints(p.PreviousEndpoints) {
