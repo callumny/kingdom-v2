@@ -14,7 +14,7 @@ type WizardBenchmarkRow struct {
 	Status   string
 }
 
-func benchmarkSetupView(_ *setup.Workflow, p Presentation) ([]string, string) {
+func benchmarkSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	body := []string{
 		royalBrand.Render("Finding your Setup Wizard"),
 		"",
@@ -33,6 +33,9 @@ func benchmarkSetupView(_ *setup.Workflow, p Presentation) ([]string, string) {
 			royalCyan.Render(p.BenchmarkPhase+"…"),
 			royalMuted.Render("One warm-up and one short timed response. Results stay in this setup session."),
 		)
+	}
+	if wf.Err != nil {
+		body = append(body, "", royalRed.Render(wf.Err.Error()), royalMuted.Render("Press Esc to change your model selection."))
 	}
 	return body, royalMuted.Render("Benchmarking selected models…   •   Esc Cancel and return")
 }
@@ -71,7 +74,10 @@ func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		if wf.Draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
 			mode = "separate servers"
 		}
-		body = append(body, "Ollama:     "+mode)
+		body = append(body, fmt.Sprintf("Ollama:     %s · base port %d", mode, wf.Draft.Config.Providers.Ollama.Port))
+	}
+	if hasManagedMLXSelection(wf) {
+		body = append(body, fmt.Sprintf("MLX:        one server per model · base port %d", wf.Draft.Config.Providers.MLX.Port))
 	}
 	body = append(body, "")
 	if p.WizardBusy {
@@ -87,6 +93,15 @@ func wizardSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		footer = "Validating and saving setup…"
 	}
 	return body, royalMuted.Render(footer)
+}
+
+func hasManagedMLXSelection(wf *setup.Workflow) bool {
+	for _, option := range wf.Draft.SelectedModels() {
+		if option.Ref.EndpointID == setup.MLXEndpointID {
+			return true
+		}
+	}
+	return false
 }
 
 func hasManagedOllamaSelection(wf *setup.Workflow) bool {

@@ -91,6 +91,16 @@ func (m Model) nextWizardBenchmarkEvent(generation uint64) tea.Cmd {
 }
 
 func (m Model) finishWizardBenchmark() (Model, tea.Cmd) {
+	var failures []string
+	for _, result := range m.wizardBenchmarkResults {
+		if result.Error != "" {
+			failures = append(failures, result.Model.Ref.ModelID+": "+result.Error)
+		}
+	}
+	if len(failures) > 0 {
+		m.workflow.Err = fmt.Errorf("selected model could not be tested: %s", strings.Join(failures, "; "))
+		return m, nil
+	}
 	winner, ok := wizard.FastestReliable(m.wizardBenchmarkResults)
 	if ok {
 		m.wizardModel = winner.Model
@@ -100,9 +110,9 @@ func (m Model) finishWizardBenchmark() (Model, tea.Cmd) {
 			return m, nil
 		}
 		worker := m.workflow.Draft.Config.Topology.Roles.Worker
-		for _, option := range m.workflow.Draft.SelectedModels() {
-			if option.Ref.Assignment() == worker {
-				m.wizardModel = option
+		for _, result := range m.wizardBenchmarkResults {
+			if result.Model.Ref.Assignment() == worker {
+				m.wizardModel = result.Model
 				break
 			}
 		}

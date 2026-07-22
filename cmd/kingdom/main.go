@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/callumny/kingdom/internal/app"
@@ -20,6 +22,7 @@ import (
 	"github.com/callumny/kingdom/internal/skills"
 	"github.com/callumny/kingdom/internal/tools"
 	"github.com/callumny/kingdom/internal/topology"
+	"github.com/callumny/kingdom/internal/wizard"
 )
 
 func main() {
@@ -76,7 +79,7 @@ func main() {
 		},
 		Save: func(next config.Config) error { return config.Save(path, next) },
 		PrepareRun: func(ctx context.Context, cfg config.Config) (config.Config, error) {
-			return prepareRuntimeConfig(ctx, cfg, localModelManager.EnsureOllamaServers)
+			return prepareRuntimeConfig(ctx, cfg, localModelManager.EnsureOllamaServers, localModelManager.EnsureMLXServers)
 		},
 		Run: func(ctx context.Context, cfg config.Config, prompt string, active []skills.Skill) <-chan orchestration.Event {
 			return orchestration.NewEngine(cfg, client, orchestration.WithTools(toolRunner), orchestration.WithSkills(active), orchestration.WithMemory(memoryStore, sessionID, 6)).Stream(ctx, prompt)
@@ -87,6 +90,14 @@ func main() {
 		Installer:     providerInstaller,
 		ModelSearch:   modelcatalog.DefaultRemote(nil),
 		ModelDownload: modelDownloader,
+		WizardBenchmark: wizard.Benchmarker{
+			Client:          client,
+			TimeoutPerModel: 30 * time.Second,
+			Prepare: func(ctx context.Context, models []setup.ModelOption) []wizard.PreparedModel {
+				return prepareWizardModels(ctx, c, models, localModelManager.EnsureOllamaServers, localModelManager.EnsureMLXServers)
+			},
+		},
+		WizardClient: client,
 	}
 	m := app.NewWithServices(c, services)
 	program := tea.NewProgram(m)
@@ -95,7 +106,12 @@ func main() {
 	}
 }
 
-func prepareRuntimeConfig(ctx context.Context, persisted config.Config, ensure func(context.Context, []topology.Endpoint) error) (config.Config, error) {
+func prepareRuntimeConfig(
+	ctx context.Context,
+	persisted config.Config,
+	ensureOllama func(context.Context, []topology.Endpoint) error,
+	ensureMLX func(context.Context, []localmodels.ModelServer) error,
+) (config.Config, error) {
 	plan, err := config.BuildRuntimePlan(persisted)
 	if err != nil {
 		return config.Config{}, fmt.Errorf("plan local runtimes: %w", err)
@@ -110,12 +126,86 @@ func prepareRuntimeConfig(ctx context.Context, persisted config.Config, ensure f
 		endpoints = append(endpoints, route.Endpoint)
 	}
 	if len(endpoints) > 0 {
-		if ensure == nil {
+		if ensureOllama == nil {
 			return config.Config{}, fmt.Errorf("prepare Ollama servers: local model manager is unavailable")
 		}
-		if err := ensure(ctx, endpoints); err != nil {
+		if err := ensureOllama(ctx, endpoints); err != nil {
 			return config.Config{}, fmt.Errorf("prepare Ollama servers: %w", err)
 		}
 	}
+	if len(plan.MLXRoutes) > 0 {
+		if ensureMLX == nil {
+			return config.Config{}, fmt.Errorf("prepare MLX servers: local model manager is unavailable")
+		}
+		servers := make([]localmodels.ModelServer, len(plan.MLXRoutes))
+		for index, route := range plan.MLXRoutes {
+			servers[index] = localmodels.ModelServer{Model: route.Model, Endpoint: route.Endpoint}
+		}
+		if err := ensureMLX(ctx, servers); err != nil {
+			return config.Config{}, fmt.Errorf("prepare MLX servers: %w", err)
+		}
+	}
 	return plan.Config, nil
+}
+
+func prepareWizardModels(
+	ctx context.Context,
+	cfg config.Config,
+	models []setup.ModelOption,
+	ensureOllama func(context.Context, []topology.Endpoint) error,
+	ensureMLX func(context.Context, []localmodels.ModelServer) error,
+) []wizard.PreparedModel {
+	prepared := make([]wizard.PreparedModel, len(models))
+	var ollamaIndexes []int
+	mlxIndexes := make(map[string][]int)
+	for index, model := range models {
+		prepared[index].Model = model
+		switch model.Ref.EndpointID {
+		case setup.OllamaEndpointID:
+			prepared[index].Model.Endpoint = topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama", Kind: topology.KindOllama, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", cfg.Providers.Ollama.Port)}
+			ollamaIndexes = append(ollamaIndexes, index)
+		case setup.MLXEndpointID:
+			mlxIndexes[model.Ref.ModelID] = append(mlxIndexes[model.Ref.ModelID], index)
+		default:
+			prepared[index].Err = fmt.Errorf("unsupported Wizard provider %q", model.Ref.EndpointID)
+		}
+	}
+	if len(ollamaIndexes) > 0 {
+		if ensureOllama == nil {
+			for _, index := range ollamaIndexes {
+				prepared[index].Err = fmt.Errorf("Ollama runtime manager is unavailable")
+			}
+		} else if err := ensureOllama(ctx, []topology.Endpoint{prepared[ollamaIndexes[0]].Model.Endpoint}); err != nil {
+			for _, index := range ollamaIndexes {
+				prepared[index].Err = err
+			}
+		}
+	}
+	mlxModels := make([]string, 0, len(mlxIndexes))
+	for model := range mlxIndexes {
+		mlxModels = append(mlxModels, model)
+	}
+	sort.Strings(mlxModels)
+	benchmarkBase := cfg.Providers.MLX.Port + setup.MaxSelectedModels
+	for offset, model := range mlxModels {
+		port := benchmarkBase + offset
+		endpoint := topology.Endpoint{ID: fmt.Sprintf("mlx-benchmark-%d", offset), Name: "MLX · " + model, Kind: topology.KindOpenAICompatible, BaseURL: fmt.Sprintf("http://127.0.0.1:%d/v1", port)}
+		for _, index := range mlxIndexes[model] {
+			prepared[index].Model.Endpoint = endpoint
+		}
+		var err error
+		if port > 65535 {
+			err = fmt.Errorf("MLX benchmark port exceeds 65535; choose a lower MLX base port")
+		} else if ensureMLX == nil {
+			err = fmt.Errorf("MLX runtime manager is unavailable")
+		} else {
+			err = ensureMLX(ctx, []localmodels.ModelServer{{Model: model, Endpoint: endpoint}})
+		}
+		if err != nil {
+			for _, index := range mlxIndexes[model] {
+				prepared[index].Err = err
+			}
+		}
+	}
+	return prepared
 }

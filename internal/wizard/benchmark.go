@@ -40,17 +40,38 @@ type BenchmarkResult struct {
 	Error           string
 }
 
+type PreparedModel struct {
+	Model setup.ModelOption
+	Err   error
+}
+
+type PrepareModelsFunc func(context.Context, []setup.ModelOption) []PreparedModel
+
 type Benchmarker struct {
 	Client          CompletionClient
+	Prepare         PrepareModelsFunc
 	TimeoutPerModel time.Duration
 	WarmupTokens    int
 	SampleTokens    int
 }
 
 func (b Benchmarker) Run(ctx context.Context, models []setup.ModelOption, report func(BenchmarkProgress)) []BenchmarkResult {
-	results := make([]BenchmarkResult, 0, len(models))
+	prepared := make([]PreparedModel, len(models))
 	for index, model := range models {
+		prepared[index] = PreparedModel{Model: model}
+	}
+	if b.Prepare != nil {
+		prepared = b.Prepare(ctx, append([]setup.ModelOption(nil), models...))
+	}
+	results := make([]BenchmarkResult, 0, len(prepared))
+	for index, item := range prepared {
+		model := item.Model
 		result := BenchmarkResult{Model: model}
+		if item.Err != nil {
+			result.Error = item.Err.Error()
+			results = append(results, result)
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			result.Error = err.Error()
 			results = append(results, result)
@@ -58,7 +79,7 @@ func (b Benchmarker) Run(ctx context.Context, models []setup.ModelOption, report
 		}
 		modelContext, cancel := context.WithTimeout(ctx, b.timeout())
 		if report != nil {
-			report(BenchmarkProgress{Index: index, Total: len(models), Model: model.Ref.ModelID, Phase: BenchmarkWarming})
+			report(BenchmarkProgress{Index: index, Total: len(prepared), Model: model.Ref.ModelID, Phase: BenchmarkWarming})
 		}
 		_, err := b.Client.Complete(modelContext, model.Endpoint, model.Ref.ModelID, []modelapi.Message{{Role: "user", Content: "Reply with only: ready"}}, b.warmupTokens())
 		if err != nil {
@@ -68,7 +89,7 @@ func (b Benchmarker) Run(ctx context.Context, models []setup.ModelOption, report
 			continue
 		}
 		if report != nil {
-			report(BenchmarkProgress{Index: index, Total: len(models), Model: model.Ref.ModelID, Phase: BenchmarkTesting})
+			report(BenchmarkProgress{Index: index, Total: len(prepared), Model: model.Ref.ModelID, Phase: BenchmarkTesting})
 		}
 		completion, err := b.Client.Complete(modelContext, model.Endpoint, model.Ref.ModelID, []modelapi.Message{{Role: "user", Content: capabilityPrompt}}, b.sampleTokens())
 		cancel()

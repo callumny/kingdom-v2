@@ -33,6 +33,7 @@ func ToolDefinitions() []ToolDefinition {
 		{Name: "set_council_size", Description: "Set the number of Council reviewers from 1 to 9.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":9}},"required":["count"],"additionalProperties":false}`)},
 		{Name: "set_worker_concurrency", Description: "Set concurrent Workers from 1 to 32.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":32}},"required":["count"],"additionalProperties":false}`)},
 		{Name: "set_ollama_server_mode", Description: "Use separate Ollama servers per model or one shared server.", Parameters: schema(`{"type":"object","properties":{"mode":{"enum":["separate","shared"]}},"required":["mode"],"additionalProperties":false}`)},
+		{Name: "set_provider_port", Description: "Set the base loopback port for an enabled Ollama or MLX provider.", Parameters: schema(`{"type":"object","properties":{"provider":{"enum":["ollama","mlx"]},"port":{"type":"integer","minimum":1,"maximum":65535}},"required":["provider","port"],"additionalProperties":false}`)},
 		{Name: "preview_setup", Description: "Validate and return the complete proposed setup.", Parameters: schema(`{"type":"object","additionalProperties":false}`)},
 		{Name: "apply_setup", Description: "Validate and save setup after the user explicitly confirms Apply and launch.", Parameters: schema(`{"type":"object","additionalProperties":false}`)},
 	}
@@ -163,6 +164,14 @@ func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 		if err = decodeArguments(call.Arguments, &arguments); err == nil {
 			err = s.setOllamaMode(arguments.Mode)
 		}
+	case "set_provider_port":
+		var arguments struct {
+			Provider string `json:"provider"`
+			Port     int    `json:"port"`
+		}
+		if err = decodeArguments(call.Arguments, &arguments); err == nil {
+			err = s.setProviderPort(arguments.Provider, arguments.Port)
+		}
 	case "preview_setup":
 		err = decodeArguments(call.Arguments, &struct{}{})
 		if err == nil {
@@ -252,6 +261,37 @@ func (s *Session) setOllamaMode(mode string) error {
 	return nil
 }
 
+func (s *Session) setProviderPort(provider string, port int) error {
+	if port < 1 || port > 65535 {
+		return errors.New("provider port must be 1..65535")
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "ollama":
+		if !s.draft.Config.Providers.Ollama.Enabled {
+			return errors.New("Ollama is not enabled")
+		}
+		previous := s.draft.Config.Providers.Ollama.Port
+		s.draft.Config.Providers.Ollama.Port = port
+		if err := config.ValidateRuntimePortPlan(s.draft.Config); err != nil {
+			s.draft.Config.Providers.Ollama.Port = previous
+			return err
+		}
+	case "mlx":
+		if !s.draft.Config.Providers.MLX.Enabled {
+			return errors.New("MLX is not enabled")
+		}
+		previous := s.draft.Config.Providers.MLX.Port
+		s.draft.Config.Providers.MLX.Port = port
+		if err := config.ValidateRuntimePortPlan(s.draft.Config); err != nil {
+			s.draft.Config.Providers.MLX.Port = previous
+			return err
+		}
+	default:
+		return errors.New("provider must be ollama or mlx")
+	}
+	return nil
+}
+
 type modelSnapshot struct {
 	Number        int    `json:"number"`
 	Provider      string `json:"provider"`
@@ -269,6 +309,8 @@ type setupSnapshot struct {
 	CouncilSize       int             `json:"council_size"`
 	WorkerConcurrency int             `json:"worker_concurrency"`
 	OllamaServerMode  string          `json:"ollama_server_mode,omitempty"`
+	OllamaPort        int             `json:"ollama_port,omitempty"`
+	MLXPort           int             `json:"mlx_port,omitempty"`
 	ValidationError   string          `json:"validation_error,omitempty"`
 }
 
@@ -290,10 +332,14 @@ func (s *Session) snapshot(validate bool) setupSnapshot {
 	snapshot.Worker = assignmentNumber(s.draft.Config.Topology.Roles.Worker, selected)
 	snapshot.Council = assignmentNumber(s.draft.Config.Topology.Roles.Council, selected)
 	if hasSelectedOllama(selected) {
+		snapshot.OllamaPort = s.draft.Config.Providers.Ollama.Port
 		snapshot.OllamaServerMode = "shared"
 		if s.draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
 			snapshot.OllamaServerMode = "separate"
 		}
+	}
+	if hasSelectedProvider(selected, setup.MLXEndpointID) {
+		snapshot.MLXPort = s.draft.Config.Providers.MLX.Port
 	}
 	if validate {
 		if err := validateDraft(s.draft); err != nil {
@@ -315,8 +361,12 @@ func assignmentNumber(assignment topology.Assignment, selected []setup.ModelOpti
 }
 
 func hasSelectedOllama(selected []setup.ModelOption) bool {
+	return hasSelectedProvider(selected, setup.OllamaEndpointID)
+}
+
+func hasSelectedProvider(selected []setup.ModelOption, endpointID string) bool {
 	for _, option := range selected {
-		if option.Ref.EndpointID == setup.OllamaEndpointID {
+		if option.Ref.EndpointID == endpointID {
 			return true
 		}
 	}
@@ -344,7 +394,7 @@ func validateDraft(draft *setup.Draft) error {
 	if draft.Config.WorkerConcurrency < 1 || draft.Config.WorkerConcurrency > 32 {
 		return errors.New("worker concurrency must be 1..32")
 	}
-	return config.ValidateOllamaPortPlan(draft.Config)
+	return config.ValidateRuntimePortPlan(draft.Config)
 }
 
 func decodeArguments(raw json.RawMessage, target any) error {

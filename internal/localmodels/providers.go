@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/callumny/kingdom/internal/topology"
@@ -102,11 +104,35 @@ func (p *mlxProvider) start(_ context.Context, modelID string) error {
 	if !containsModel(models, modelID) {
 		return fmt.Errorf("MLX model %q is not installed in the local cache", modelID)
 	}
-	args := []string{"--model", modelID, "--host", "127.0.0.1", "--port", "8080"}
+	_, port, err := validateMLXServerEndpoint(p.endpoint)
+	if err != nil {
+		return err
+	}
+	args := []string{"--model", modelID, "--host", "127.0.0.1", "--port", port}
 	if err := p.system.Start(executable, args, []string{"HF_HUB_OFFLINE=1", "HF_HUB_CACHE=" + p.cacheRoot}); err != nil {
 		return fmt.Errorf("start MLX model: %w", err)
 	}
 	return nil
+}
+
+func validateMLXServerEndpoint(endpoint topology.Endpoint) (string, string, error) {
+	if endpoint.Kind != topology.KindOpenAICompatible {
+		return "", "", errors.New("must use the OpenAI-compatible endpoint kind")
+	}
+	parsed, err := url.Parse(endpoint.BaseURL)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/" && parsed.Path != "/v1" && parsed.Path != "/v1/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", errors.New("must be an HTTP loopback URL with an explicit port and optional /v1 path")
+	}
+	hostname := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	address := net.ParseIP(hostname)
+	if hostname != "localhost" && (address == nil || !address.IsLoopback()) {
+		return "", "", errors.New("must bind to localhost")
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", "", errors.New("port must be 1..65535")
+	}
+	return parsed.Host, parsed.Port(), nil
 }
 
 func (p *mlxProvider) serverExecutable() (string, error) {

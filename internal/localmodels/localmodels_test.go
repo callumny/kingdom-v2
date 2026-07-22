@@ -191,6 +191,45 @@ func TestEnsureOllamaServersRejectsUnsafeEndpoints(t *testing.T) {
 	}
 }
 
+func TestEnsureMLXServersStartsEachModelOnItsAssignedPort(t *testing.T) {
+	cache := createCachedMLXModel(t, "mlx-community", "large")
+	createCachedMLXModelAt(t, cache, "mlx-community", "small")
+	discoverer := &mlxEndpointReadiness{loaded: make(map[string]string)}
+	system := &fakeSystem{paths: map[string]string{"mlx_lm.server": "/tools/mlx_lm.server"}}
+	system.startHook = discoverer.markStarted
+	manager := New(system, discoverer, cache)
+	servers := []ModelServer{
+		{Model: "mlx-community/large", Endpoint: topology.Endpoint{ID: "large", Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:13000/v1"}},
+		{Model: "mlx-community/small", Endpoint: topology.Endpoint{ID: "small", Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:13001/v1"}},
+	}
+
+	if err := manager.EnsureMLXServers(context.Background(), servers); err != nil {
+		t.Fatal(err)
+	}
+	want := []commandCall{
+		{name: "/tools/mlx_lm.server", args: []string{"--model", "mlx-community/large", "--host", "127.0.0.1", "--port", "13000"}, env: []string{"HF_HUB_OFFLINE=1", "HF_HUB_CACHE=" + cache}},
+		{name: "/tools/mlx_lm.server", args: []string{"--model", "mlx-community/small", "--host", "127.0.0.1", "--port", "13001"}, env: []string{"HF_HUB_OFFLINE=1", "HF_HUB_CACHE=" + cache}},
+	}
+	if !reflect.DeepEqual(system.started, want) {
+		t.Fatalf("started=%+v want=%+v", system.started, want)
+	}
+}
+
+func TestEnsureMLXServersRejectsRemoteOrConflictingEndpoints(t *testing.T) {
+	manager := New(&fakeSystem{paths: map[string]string{"mlx_lm.server": "/tools/mlx_lm.server"}}, fakeDiscoverer{}, t.TempDir())
+	for _, servers := range [][]ModelServer{
+		{{Model: "model", Endpoint: topology.Endpoint{Kind: topology.KindOpenAICompatible, BaseURL: "http://192.168.1.20:8080/v1"}}},
+		{
+			{Model: "one", Endpoint: topology.Endpoint{Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:8080/v1"}},
+			{Model: "two", Endpoint: topology.Endpoint{Kind: topology.KindOpenAICompatible, BaseURL: "http://127.0.0.1:8080/v1"}},
+		},
+	} {
+		if err := manager.EnsureMLXServers(context.Background(), servers); err == nil {
+			t.Fatalf("unsafe MLX servers accepted: %+v", servers)
+		}
+	}
+}
+
 type endpointReadiness struct {
 	running map[string]bool
 }
@@ -208,6 +247,36 @@ func (d *endpointReadiness) markStarted(call commandCall) {
 		if strings.HasPrefix(value, "OLLAMA_HOST=") {
 			d.running["http://"+strings.TrimPrefix(value, "OLLAMA_HOST=")] = true
 		}
+	}
+}
+
+type mlxEndpointReadiness struct {
+	loaded map[string]string
+}
+
+func (d *mlxEndpointReadiness) Discover(_ context.Context, endpoints []topology.Endpoint) ([]discovery.Result, error) {
+	result := discovery.Result{Endpoint: endpoints[0]}
+	model := d.loaded[endpoints[0].BaseURL]
+	if model == "" {
+		result.Err = errors.New("connection refused")
+	} else {
+		result.Models = []discovery.Model{{ID: model}}
+	}
+	return []discovery.Result{result}, nil
+}
+
+func (d *mlxEndpointReadiness) markStarted(call commandCall) {
+	var model, port string
+	for index := range call.args {
+		if call.args[index] == "--model" && index+1 < len(call.args) {
+			model = call.args[index+1]
+		}
+		if call.args[index] == "--port" && index+1 < len(call.args) {
+			port = call.args[index+1]
+		}
+	}
+	if model != "" && port != "" {
+		d.loaded["http://127.0.0.1:"+port+"/v1"] = model
 	}
 }
 
@@ -343,6 +412,12 @@ func TestLocalModelsHelperProcess(t *testing.T) {
 func createCachedMLXModel(t *testing.T, owner, name string) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "hub")
+	createCachedMLXModelAt(t, root, owner, name)
+	return root
+}
+
+func createCachedMLXModelAt(t *testing.T, root, owner, name string) {
+	t.Helper()
 	snapshot := filepath.Join(root, "models--"+owner+"--"+name, "snapshots", "abc")
 	if err := os.MkdirAll(snapshot, 0700); err != nil {
 		t.Fatal(err)
@@ -352,7 +427,6 @@ func createCachedMLXModel(t *testing.T, owner, name string) string {
 			t.Fatal(err)
 		}
 	}
-	return root
 }
 
 func joinArgs(args []string) string {

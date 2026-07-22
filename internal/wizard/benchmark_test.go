@@ -20,13 +20,38 @@ type benchmarkResponse struct {
 type fakeCompletionClient struct {
 	responses []benchmarkResponse
 	calls     []string
+	endpoints []topology.Endpoint
 }
 
-func (f *fakeCompletionClient) Complete(_ context.Context, _ topology.Endpoint, model string, _ []modelapi.Message, maxTokens int) (modelapi.Completion, error) {
+func (f *fakeCompletionClient) Complete(_ context.Context, endpoint topology.Endpoint, model string, _ []modelapi.Message, maxTokens int) (modelapi.Completion, error) {
 	f.calls = append(f.calls, model+":"+string(rune(maxTokens)))
+	f.endpoints = append(f.endpoints, endpoint)
 	response := f.responses[0]
 	f.responses = f.responses[1:]
 	return response.completion, response.err
+}
+
+func TestBenchmarkUsesPreparedEndpointsAndKeepsPreparationFailuresPerModel(t *testing.T) {
+	client := &fakeCompletionClient{responses: []benchmarkResponse{
+		{completion: modelapi.Completion{Content: "ok"}},
+		{completion: modelapi.Completion{Content: `{"tool":{"name":"inspect_setup","arguments":{}}}`, CompletionTokens: 10, GenerationDuration: time.Second}},
+	}}
+	preparedURL := "http://127.0.0.1:13000/v1"
+	runner := Benchmarker{
+		Client: client,
+		Prepare: func(_ context.Context, models []setup.ModelOption) []PreparedModel {
+			models[0].Endpoint.BaseURL = preparedURL
+			return []PreparedModel{{Model: models[0]}, {Model: models[1], Err: errors.New("server unavailable")}}
+		},
+	}
+
+	results := runner.Run(context.Background(), benchmarkModels(), nil)
+	if len(results) != 2 || results[0].Model.Endpoint.BaseURL != preparedURL || results[1].Error != "server unavailable" {
+		t.Fatalf("results=%+v", results)
+	}
+	if len(client.endpoints) != 2 || client.endpoints[0].BaseURL != preparedURL || client.endpoints[1].BaseURL != preparedURL {
+		t.Fatalf("completion endpoints=%+v", client.endpoints)
+	}
 }
 
 func TestBenchmarkRunsWarmupThenTimedCapabilityCheckSequentially(t *testing.T) {

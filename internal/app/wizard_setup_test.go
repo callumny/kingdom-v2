@@ -61,6 +61,41 @@ func TestModelsAdvanceThroughBenchmarkIntoWizard(t *testing.T) {
 	}
 }
 
+func TestBenchmarkStaysVisibleWhenNoSelectedModelCanRun(t *testing.T) {
+	completion := &appCompletionClient{}
+	benchmark := wizard.Benchmarker{
+		Client: completion,
+		Prepare: func(_ context.Context, models []setup.ModelOption) []wizard.PreparedModel {
+			return []wizard.PreparedModel{
+				{Model: models[0], Err: context.DeadlineExceeded},
+				{Model: models[1], Err: context.DeadlineExceeded},
+			}
+		},
+	}
+	m := wizardAppModel(benchmark, &appWizardClient{responses: []string{`{"type":"message","content":"unexpected","ready":true}`}}, nil)
+	m.screen, m.workflow.State = setup.StateModels, setup.StateModels
+	m, command := m.advanceFromModels()
+	for steps := 0; steps < 6 && command != nil; steps++ {
+		m, command = update(m, command())
+	}
+	if m.screen != setup.StateBenchmark || m.workflow.Err == nil {
+		t.Fatalf("screen=%v err=%v", m.screen, m.workflow.Err)
+	}
+}
+
+func TestUnreliableFallbackKeepsThePreparedRuntimeEndpoint(t *testing.T) {
+	m := wizardAppModel(wizard.Benchmarker{}, &appWizardClient{responses: []string{`{"type":"message","content":"ready","ready":true}`}}, nil)
+	m.screen, m.workflow.State = setup.StateBenchmark, setup.StateBenchmark
+	selected := m.workflow.Draft.SelectedModels()
+	selected[1].Endpoint.BaseURL = "http://127.0.0.1:18083/v1"
+	m.wizardBenchmarkResults = []wizard.BenchmarkResult{{Model: selected[0]}, {Model: selected[1]}}
+
+	m, command := m.finishWizardBenchmark()
+	if command == nil || m.wizardModel.Ref.ModelID != "small" || m.wizardModel.Endpoint.BaseURL != "http://127.0.0.1:18083/v1" {
+		t.Fatalf("fallback model=%+v command=%v", m.wizardModel, command)
+	}
+}
+
 func TestWizardCanChangeDraftAndApplyIntoNormalChat(t *testing.T) {
 	var saved config.Config
 	chat := &appWizardClient{responses: []string{

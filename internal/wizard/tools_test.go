@@ -14,7 +14,7 @@ import (
 )
 
 func TestToolDefinitionsAreSmallAndSinglePurpose(t *testing.T) {
-	want := []string{"inspect_setup", "enable_council", "assign_model", "set_council_size", "set_worker_concurrency", "set_ollama_server_mode", "preview_setup", "apply_setup"}
+	want := []string{"inspect_setup", "enable_council", "assign_model", "set_council_size", "set_worker_concurrency", "set_ollama_server_mode", "set_provider_port", "preview_setup", "apply_setup"}
 	definitions := ToolDefinitions()
 	if len(definitions) != len(want) {
 		t.Fatalf("definitions=%+v", definitions)
@@ -54,6 +54,7 @@ func TestSetupToolsMutateOnlyTheirOwnSetting(t *testing.T) {
 		{"set_council_size", `{"count":2}`},
 		{"set_worker_concurrency", `{"count":4}`},
 		{"set_ollama_server_mode", `{"mode":"separate"}`},
+		{"set_provider_port", `{"provider":"mlx","port":13000}`},
 	} {
 		if result := session.Run(context.Background(), call(item.name, item.args)); result.Error != "" {
 			t.Fatalf("%s: %s", item.name, result.Error)
@@ -64,7 +65,7 @@ func TestSetupToolsMutateOnlyTheirOwnSetting(t *testing.T) {
 	if cfg.Topology.Roles.King.Model != "large" || cfg.Topology.Roles.Worker.Model != "small" || cfg.Topology.Roles.Council.Model != "small" {
 		t.Fatalf("roles=%+v", cfg.Topology.Roles)
 	}
-	if !cfg.CouncilEnabled || cfg.CouncilSize != 2 || cfg.WorkerConcurrency != 4 || cfg.Providers.Ollama.PortMode != config.OllamaDedicatedPorts {
+	if !cfg.CouncilEnabled || cfg.CouncilSize != 2 || cfg.WorkerConcurrency != 4 || cfg.Providers.Ollama.PortMode != config.OllamaDedicatedPorts || cfg.Providers.MLX.Port != 13000 {
 		t.Fatalf("settings=%+v", cfg)
 	}
 	preview := session.Run(context.Background(), call("preview_setup", `{}`))
@@ -84,6 +85,8 @@ func TestSetupToolsRejectInvalidOrCombinedArguments(t *testing.T) {
 		{"set_council_size", `{"count":0}`},
 		{"set_worker_concurrency", `{"count":33}`},
 		{"set_ollama_server_mode", `{"mode":"automatic"}`},
+		{"set_provider_port", `{"provider":"mlx","port":70000}`},
+		{"set_provider_port", `{"provider":"unknown","port":8080}`},
 		{"enable_council", `{"enabled":true,"count":2}`},
 		{"unknown", `{}`},
 	} {

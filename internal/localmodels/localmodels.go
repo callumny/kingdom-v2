@@ -45,6 +45,12 @@ type Runtime struct {
 	InstallHint string
 }
 
+// ModelServer binds one local model to one dedicated provider endpoint.
+type ModelServer struct {
+	Model    string
+	Endpoint topology.Endpoint
+}
+
 type System interface {
 	LookPath(string) (string, error)
 	Output(context.Context, string, ...string) ([]byte, error)
@@ -184,6 +190,71 @@ func (m *Manager) EnsureOllamaServers(ctx context.Context, endpoints []topology.
 		}
 		if err := waitForProvider(waitContext, &target, KindOllama, ""); err != nil {
 			return fmt.Errorf("Ollama on %s: %w", host, err)
+		}
+	}
+	return nil
+}
+
+// EnsureMLXServers starts one MLX server per model and waits for each model to
+// answer on its assigned loopback endpoint.
+func (m *Manager) EnsureMLXServers(ctx context.Context, servers []ModelServer) error {
+	if len(servers) == 0 {
+		return nil
+	}
+	if m == nil {
+		return errors.New("local model manager is unavailable")
+	}
+	var base *mlxProvider
+	for _, candidate := range m.providers {
+		if provider, ok := candidate.(*mlxProvider); ok {
+			base = provider
+			break
+		}
+	}
+	if base == nil {
+		return errors.New("MLX provider is unavailable")
+	}
+
+	waitContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	byAddress := make(map[string]string, len(servers))
+	for _, server := range servers {
+		modelID := strings.TrimSpace(server.Model)
+		if modelID == "" {
+			return errors.New("MLX server requires a model")
+		}
+		address, _, err := validateMLXServerEndpoint(server.Endpoint)
+		if err != nil {
+			return fmt.Errorf("MLX endpoint %q: %w", server.Endpoint.ID, err)
+		}
+		if existing := byAddress[address]; existing != "" && existing != modelID {
+			return fmt.Errorf("MLX endpoint %s is assigned to both %q and %q", address, existing, modelID)
+		}
+		byAddress[address] = modelID
+		if err := waitContext.Err(); err != nil {
+			return err
+		}
+		running, models, _ := probe(waitContext, base.discoverer, server.Endpoint)
+		if running {
+			servingSelectedModel := false
+			for _, model := range models {
+				if model.ID == modelID {
+					servingSelectedModel = true
+					break
+				}
+			}
+			if servingSelectedModel {
+				continue
+			}
+			return fmt.Errorf("MLX endpoint %s is already serving a different model", address)
+		}
+		target := *base
+		target.endpoint = server.Endpoint
+		if err := target.start(waitContext, modelID); err != nil {
+			return fmt.Errorf("start MLX model %q on %s: %w", modelID, address, err)
+		}
+		if err := waitForProvider(waitContext, &target, KindMLX, modelID); err != nil {
+			return fmt.Errorf("MLX model %q on %s: %w", modelID, address, err)
 		}
 	}
 	return nil
