@@ -21,6 +21,12 @@ type Message struct {
 type ChatClient interface {
 	Chat(context.Context, topology.Endpoint, string, []Message) (string, error)
 }
+
+type Completion struct {
+	Content            string
+	CompletionTokens   int
+	GenerationDuration time.Duration
+}
 type Client struct {
 	HTTP             *http.Client
 	Timeout          time.Duration
@@ -34,11 +40,19 @@ func NewClient() *Client {
 	return &Client{HTTP: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Timeout: 60 * time.Second, MaxResponseBytes: 2 << 20, RetryDelay: 100 * time.Millisecond}
 }
 func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, msgs []Message) (string, error) {
+	completion, err := c.Complete(ctx, ep, model, msgs, 0)
+	return completion.Content, err
+}
+
+// Complete performs one bounded non-streaming generation and preserves the
+// normalized timing metadata used by the setup benchmark. maxTokens <= 0 lets
+// the provider use its normal default.
+func (c *Client) Complete(ctx context.Context, ep topology.Endpoint, model string, msgs []Message, maxTokens int) (Completion, error) {
 	if err := ep.Validate(); err != nil {
-		return "", err
+		return Completion{}, err
 	}
 	if strings.TrimSpace(model) == "" {
-		return "", fmt.Errorf("model required")
+		return Completion{}, fmt.Errorf("model required")
 	}
 	base := strings.TrimRight(ep.BaseURL, "/")
 	path := "/api/chat"
@@ -47,18 +61,23 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 	}
 	u, err := url.JoinPath(base, path)
 	if err != nil {
-		return "", err
+		return Completion{}, err
 	}
 	payload := map[string]any{"model": model, "messages": msgs}
 	if ep.Kind == topology.KindOllama {
 		payload["stream"] = false
+		if maxTokens > 0 {
+			payload["options"] = map[string]int{"num_predict": maxTokens}
+		}
+	} else if maxTokens > 0 {
+		payload["max_tokens"] = maxTokens
 	}
 	body, _ := json.Marshal(payload)
 	attempts := 2
 	var last error
 	for i := 0; i < attempts; i++ {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return Completion{}, err
 		}
 		reqctx := ctx
 		cancel := func() {}
@@ -69,7 +88,7 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 		retryDelay := c.RetryDelay
 		if er != nil {
 			cancel()
-			return "", er
+			return Completion{}, er
 		}
 		req.Header.Set("Content-Type", "application/json")
 		hc := c.HTTP
@@ -80,23 +99,24 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 			cp.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 			hc = &cp
 		}
+		started := time.Now()
 		resp, er := hc.Do(req)
 		if er != nil {
 			// Never retry caller cancellation or deadlines (including the
 			// client's per-request timeout).
 			if ctx.Err() != nil {
 				cancel()
-				return "", ctx.Err()
+				return Completion{}, ctx.Err()
 			}
 			if reqctx.Err() != nil {
 				cancel()
-				return "", reqctx.Err()
+				return Completion{}, reqctx.Err()
 			}
 			cancel()
 			last = er
 			if i+1 < attempts {
 				if !waitRetry(ctx, retryDelay) {
-					return "", ctx.Err()
+					return Completion{}, ctx.Err()
 				}
 			}
 			continue
@@ -105,7 +125,7 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 		resp.Body.Close()
 		cancel()
 		if int64(len(data)) > c.limit() {
-			return "", fmt.Errorf("response exceeds limit")
+			return Completion{}, fmt.Errorf("response exceeds limit")
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			// Report only the numeric status from the transport; Status is
@@ -116,40 +136,43 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 					retryDelay = h
 				}
 				if i+1 < attempts && !waitRetry(ctx, retryDelay) {
-					return "", ctx.Err()
+					return Completion{}, ctx.Err()
 				}
 				continue
 			}
-			return "", last
+			return Completion{}, last
 		}
 		if readErr != nil {
 			last = readErr
 			if i+1 < attempts && !waitRetry(ctx, retryDelay) {
-				return "", ctx.Err()
+				return Completion{}, ctx.Err()
 			}
 			continue
 		}
 		if len(bytes.TrimSpace(data)) == 0 {
 			last = fmt.Errorf("empty response")
 			if i+1 < attempts && !waitRetry(ctx, retryDelay) {
-				return "", ctx.Err()
+				return Completion{}, ctx.Err()
 			}
 			continue
 		}
-		txt, er := parse(ep.Kind, data)
+		completion, er := parseCompletion(ep.Kind, data)
 		if er != nil {
-			return "", er
+			return Completion{}, er
 		}
-		if strings.TrimSpace(txt) == "" {
+		if strings.TrimSpace(completion.Content) == "" {
 			last = fmt.Errorf("empty response")
 			if i+1 < attempts && !waitRetry(ctx, retryDelay) {
-				return "", ctx.Err()
+				return Completion{}, ctx.Err()
 			}
 			continue
 		}
-		return txt, nil
+		if completion.GenerationDuration <= 0 {
+			completion.GenerationDuration = time.Since(started)
+		}
+		return completion, nil
 	}
-	return "", last
+	return Completion{}, last
 }
 func waitRetry(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
@@ -211,26 +234,53 @@ func sanitize(b []byte) string {
 	return bld.String()
 }
 func parse(k topology.EndpointKind, b []byte) (string, error) {
+	completion, err := parseCompletion(k, b)
+	return completion.Content, err
+}
+
+func parseCompletion(k topology.EndpointKind, b []byte) (Completion, error) {
 	var v map[string]any
 	if err := json.Unmarshal(b, &v); err != nil {
-		return "", fmt.Errorf("malformed JSON: %w", err)
+		return Completion{}, fmt.Errorf("malformed JSON: %w", err)
 	}
+	completion := Completion{}
 	if k == topology.KindOllama {
 		if x, ok := v["message"].(map[string]any); ok {
 			if s, _ := x["content"].(string); s != "" {
-				return s, nil
+				completion.Content = s
 			}
 		}
-		return "", nil
+		completion.CompletionTokens = jsonInt(v["eval_count"])
+		if nanoseconds := jsonInt64(v["eval_duration"]); nanoseconds > 0 {
+			completion.GenerationDuration = time.Duration(nanoseconds)
+		}
+		return completion, nil
 	}
 	if arr, ok := v["choices"].([]any); ok && len(arr) > 0 {
 		if m, ok := arr[0].(map[string]any); ok {
 			if msg, ok := m["message"].(map[string]any); ok {
 				if s, _ := msg["content"].(string); s != "" {
-					return s, nil
+					completion.Content = s
 				}
 			}
 		}
 	}
-	return "", nil
+	if usage, ok := v["usage"].(map[string]any); ok {
+		completion.CompletionTokens = jsonInt(usage["completion_tokens"])
+	}
+	return completion, nil
+}
+
+func jsonInt(value any) int { return int(jsonInt64(value)) }
+
+func jsonInt64(value any) int64 {
+	switch number := value.(type) {
+	case float64:
+		return int64(number)
+	case json.Number:
+		parsed, _ := number.Int64()
+		return parsed
+	default:
+		return 0
+	}
 }

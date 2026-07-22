@@ -34,6 +34,32 @@ func TestPayloadHeadersAndOpenAIPath(t *testing.T) {
 		t.Fatalf("%v %s %s %#v", err, path, ct, got)
 	}
 }
+
+func TestCompleteReturnsTimingAndLimitsProviderGeneration(t *testing.T) {
+	for _, test := range []struct {
+		kind       topology.EndpointKind
+		body       string
+		wantTokens int
+		wantLimit  string
+	}{
+		{topology.KindOllama, `{"message":{"content":"ok"},"eval_count":24,"eval_duration":500000000}`, 24, "options"},
+		{topology.KindOpenAICompatible, `{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":18}}`, 18, "max_tokens"},
+	} {
+		var payload map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			_, _ = w.Write([]byte(test.body))
+		}))
+		completion, err := NewClient().Complete(context.Background(), ep(server.URL, test.kind), "model", []Message{{Role: "user", Content: "test"}}, 24)
+		server.Close()
+		if err != nil || completion.Content != "ok" || completion.CompletionTokens != test.wantTokens || completion.GenerationDuration <= 0 {
+			t.Fatalf("kind=%s completion=%+v err=%v", test.kind, completion, err)
+		}
+		if _, exists := payload[test.wantLimit]; !exists {
+			t.Fatalf("kind=%s payload=%+v", test.kind, payload)
+		}
+	}
+}
 func TestRetryMatrix(t *testing.T) {
 	for _, code := range []int{500, 429} {
 		var n int32
