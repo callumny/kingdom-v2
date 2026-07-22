@@ -14,7 +14,7 @@ import (
 )
 
 func TestToolDefinitionsAreSmallAndSinglePurpose(t *testing.T) {
-	want := []string{"inspect_setup", "enable_council", "assign_model", "set_council_size", "set_worker_concurrency", "set_ollama_server_mode", "set_provider_port", "preview_setup", "apply_setup"}
+	want := []string{"inspect_setup", "enable_council", "assign_model", "swap_roles", "set_council_size", "set_worker_concurrency", "set_ollama_server_mode", "set_provider_port", "preview_setup", "apply_setup"}
 	definitions := ToolDefinitions()
 	if len(definitions) != len(want) {
 		t.Fatalf("definitions=%+v", definitions)
@@ -23,6 +23,22 @@ func TestToolDefinitionsAreSmallAndSinglePurpose(t *testing.T) {
 		if definitions[index].Name != name || definitions[index].Description == "" || len(definitions[index].Parameters) == 0 {
 			t.Fatalf("definition %d=%+v", index, definitions[index])
 		}
+	}
+}
+
+func TestSwapRolesExchangesAssignmentsAtomically(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	before := draft.Config.Topology.Roles
+	result := NewSession(draft).Run(context.Background(), call("swap_roles", `{"first":"king","second":"worker"}`))
+	if result.Error != "" {
+		t.Fatal(result.Error)
+	}
+	after := draft.Config.Topology.Roles
+	if after.King != before.Worker || after.Worker != before.King {
+		t.Fatalf("roles were not swapped: before=%+v after=%+v", before, after)
 	}
 }
 

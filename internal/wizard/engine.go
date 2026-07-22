@@ -71,7 +71,7 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 		if err := ctx.Err(); err != nil {
 			return Reply{}, err
 		}
-		raw, err := e.client.Chat(ctx, e.model.Endpoint, e.model.Ref.ModelID, append([]modelapi.Message(nil), e.history...))
+		raw, err := e.chat(ctx)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -121,12 +121,26 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 	return Reply{}, errors.New("Wizard tool limit reached")
 }
 
+func (e *Engine) chat(ctx context.Context) (string, error) {
+	messages := append([]modelapi.Message(nil), e.history...)
+	if client, ok := e.client.(modelapi.JSONChatClient); ok {
+		return client.ChatJSON(ctx, e.model.Endpoint, e.model.Ref.ModelID, messages)
+	}
+	return e.client.Chat(ctx, e.model.Endpoint, e.model.Ref.ModelID, messages)
+}
+
 func missingExplicitTools(request string, completed map[string]bool) []string {
 	normalized := strings.ToLower(strings.TrimSpace(request))
 	if hasAnyPrefix(normalized, "should ", "why ", "how ", "what ", "when ", "do i ", "does ", "is ", "are ") || containsAny(normalized, "explain", "recommend", "advise") {
 		return nil
 	}
 	required := make([]string, 0, 5)
+	swapRequested := strings.Contains(normalized, "swap") || (strings.Contains(normalized, "around") && containsAny(normalized, "king", "worker", "council"))
+	if swapRequested {
+		required = append(required, "swap_roles")
+	} else if containsAny(normalized, "king", "worker", "council") && strings.Contains(normalized, "model") && containsAny(normalized, "assign", "use", "change", "make", "set") {
+		required = append(required, "assign_model")
+	}
 	if strings.Contains(normalized, "council") && containsAny(normalized, "enable", "disable", "turn on", "turn off", "without", "remove") {
 		required = append(required, "enable_council")
 	}

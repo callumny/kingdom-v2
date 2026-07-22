@@ -15,6 +15,16 @@ type wizardChatClient struct {
 	messages  [][]modelapi.Message
 }
 
+type structuredWizardClient struct {
+	wizardChatClient
+	jsonCalls int
+}
+
+func (f *structuredWizardClient) ChatJSON(ctx context.Context, endpoint topology.Endpoint, model string, messages []modelapi.Message) (string, error) {
+	f.jsonCalls++
+	return f.Chat(ctx, endpoint, model, messages)
+}
+
 func (f *wizardChatClient) Chat(_ context.Context, _ topology.Endpoint, _ string, messages []modelapi.Message) (string, error) {
 	f.messages = append(f.messages, append([]modelapi.Message(nil), messages...))
 	response := f.responses[0]
@@ -35,6 +45,56 @@ func TestWizardStartAppliesDefaultsBeforeConciseRecommendation(t *testing.T) {
 	}
 	if len(client.messages) != 1 || !strings.Contains(client.messages[0][0].Content, "setup-only") || !strings.Contains(client.messages[0][0].Content, "assign_model") {
 		t.Fatalf("system prompt=%+v", client.messages)
+	}
+}
+
+func TestWizardUsesStructuredOutputWhenTheProviderSupportsIt(t *testing.T) {
+	draft := wizardDraft(t)
+	client := &structuredWizardClient{wizardChatClient: wizardChatClient{responses: []string{
+		`{"type":"message","content":"Setup ready.","ready":true}`,
+	}}}
+	_, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Start(context.Background())
+	if err != nil || client.jsonCalls != 1 {
+		t.Fatalf("structured calls=%d err=%v", client.jsonCalls, err)
+	}
+}
+
+func TestWizardSwapsRoleModelsWithOneAtomicTool(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	before := draft.Config.Topology.Roles
+	client := &wizardChatClient{responses: []string{
+		`{"type":"tool","name":"swap_roles","arguments":{"first":"king","second":"worker"}}`,
+		`{"type":"message","content":"Done.","ready":true}`,
+	}}
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), "Swap the King and Worker models")
+	if err != nil || !reply.Ready || reply.Content != "Role models swapped." {
+		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	after := draft.Config.Topology.Roles
+	if after.King != before.Worker || after.Worker != before.King {
+		t.Fatalf("roles were not swapped: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestWizardRequiresAnAssignmentToolBeforeClaimingAModelChanged(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	client := &wizardChatClient{responses: []string{
+		`{"type":"message","content":"Done.","ready":true}`,
+		`{"type":"tool","name":"assign_model","arguments":{"role":"king","model_number":2}}`,
+		`{"type":"message","content":"Done.","ready":true}`,
+	}}
+	reply, err := NewEngine(client, draft.SelectedModels()[1], NewSession(draft)).Respond(context.Background(), "Assign model 2 to the King")
+	if err != nil || !reply.Ready || reply.Content != "Role assignments updated." {
+		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+	if draft.Config.Topology.Roles.King.Model != "small" || len(client.messages) != 3 {
+		t.Fatalf("assignment=%+v calls=%d", draft.Config.Topology.Roles.King, len(client.messages))
 	}
 }
 

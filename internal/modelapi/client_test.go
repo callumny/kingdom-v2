@@ -35,6 +35,31 @@ func TestPayloadHeadersAndOpenAIPath(t *testing.T) {
 	}
 }
 
+func TestJSONChatRequestsStructuredProviderOutput(t *testing.T) {
+	for _, test := range []struct {
+		kind topology.EndpointKind
+		key  string
+	}{
+		{kind: topology.KindOllama, key: "format"},
+		{kind: topology.KindOpenAICompatible, key: "response_format"},
+	} {
+		var payload map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if test.kind == topology.KindOllama {
+				_, _ = w.Write([]byte(`{"message":{"content":"{}"}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}]}`))
+			}
+		}))
+		_, err := NewClient().ChatJSON(context.Background(), ep(server.URL, test.kind), "model", nil)
+		server.Close()
+		if err != nil || payload[test.key] == nil {
+			t.Fatalf("kind=%s payload=%+v err=%v", test.kind, payload, err)
+		}
+	}
+}
+
 func TestCompleteReturnsTimingAndLimitsProviderGeneration(t *testing.T) {
 	for _, test := range []struct {
 		kind       topology.EndpointKind

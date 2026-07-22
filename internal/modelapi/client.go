@@ -22,6 +22,10 @@ type ChatClient interface {
 	Chat(context.Context, topology.Endpoint, string, []Message) (string, error)
 }
 
+type JSONChatClient interface {
+	ChatJSON(context.Context, topology.Endpoint, string, []Message) (string, error)
+}
+
 type Completion struct {
 	Content            string
 	CompletionTokens   int
@@ -44,10 +48,19 @@ func (c *Client) Chat(ctx context.Context, ep topology.Endpoint, model string, m
 	return completion.Content, err
 }
 
+func (c *Client) ChatJSON(ctx context.Context, ep topology.Endpoint, model string, msgs []Message) (string, error) {
+	completion, err := c.complete(ctx, ep, model, msgs, 0, true)
+	return completion.Content, err
+}
+
 // Complete performs one bounded non-streaming generation and preserves the
 // normalized provider timing metadata. maxTokens <= 0 lets
 // the provider use its normal default.
 func (c *Client) Complete(ctx context.Context, ep topology.Endpoint, model string, msgs []Message, maxTokens int) (Completion, error) {
+	return c.complete(ctx, ep, model, msgs, maxTokens, false)
+}
+
+func (c *Client) complete(ctx context.Context, ep topology.Endpoint, model string, msgs []Message, maxTokens int, jsonOutput bool) (Completion, error) {
 	if err := ep.Validate(); err != nil {
 		return Completion{}, err
 	}
@@ -66,11 +79,19 @@ func (c *Client) Complete(ctx context.Context, ep topology.Endpoint, model strin
 	payload := map[string]any{"model": model, "messages": msgs}
 	if ep.Kind == topology.KindOllama {
 		payload["stream"] = false
+		if jsonOutput {
+			payload["format"] = "json"
+		}
 		if maxTokens > 0 {
 			payload["options"] = map[string]int{"num_predict": maxTokens}
 		}
-	} else if maxTokens > 0 {
-		payload["max_tokens"] = maxTokens
+	} else {
+		if jsonOutput {
+			payload["response_format"] = map[string]string{"type": "json_object"}
+		}
+		if maxTokens > 0 {
+			payload["max_tokens"] = maxTokens
+		}
 	}
 	body, _ := json.Marshal(payload)
 	attempts := 2

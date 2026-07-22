@@ -30,6 +30,7 @@ func ToolDefinitions() []ToolDefinition {
 		{Name: "inspect_setup", Description: "List selected models by number and show current settings.", Parameters: schema(`{"type":"object","additionalProperties":false}`)},
 		{Name: "enable_council", Description: "Enable or disable the optional Council. Enabling reuses the proposed King model when no Council model is assigned.", Parameters: schema(`{"type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}`)},
 		{Name: "assign_model", Description: "Assign one numbered selected model to one role.", Parameters: schema(`{"type":"object","properties":{"role":{"enum":["king","worker","council"]},"model_number":{"type":"integer","minimum":1,"maximum":3}},"required":["role","model_number"],"additionalProperties":false}`)},
+		{Name: "swap_roles", Description: "Atomically swap the models assigned to two enabled roles.", Parameters: schema(`{"type":"object","properties":{"first":{"enum":["king","worker","council"]},"second":{"enum":["king","worker","council"]}},"required":["first","second"],"additionalProperties":false}`)},
 		{Name: "set_council_size", Description: "Set the number of Council reviewers from 1 to 9.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":9}},"required":["count"],"additionalProperties":false}`)},
 		{Name: "set_worker_concurrency", Description: "Set concurrent Workers from 1 to 32.", Parameters: schema(`{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":32}},"required":["count"],"additionalProperties":false}`)},
 		{Name: "set_ollama_server_mode", Description: "Use separate Ollama servers per model or one shared server.", Parameters: schema(`{"type":"object","properties":{"mode":{"enum":["separate","shared"]}},"required":["mode"],"additionalProperties":false}`)},
@@ -125,6 +126,8 @@ func (s *Session) ChangeSummary(toolNames []string) string {
 			}
 		case "assign_model":
 			parts = append(parts, "Role assignments updated.")
+		case "swap_roles":
+			parts = append(parts, "Role models swapped.")
 		case "set_council_size":
 			parts = append(parts, fmt.Sprintf("Council members set to %d.", s.draft.Config.CouncilSize))
 		case "set_worker_concurrency":
@@ -180,6 +183,14 @@ func (s *Session) Run(ctx context.Context, call tools.Call) tools.Result {
 		}
 		if err = decodeArguments(call.Arguments, &arguments); err == nil {
 			err = s.assign(arguments.Role, arguments.ModelNumber)
+		}
+	case "swap_roles":
+		var arguments struct {
+			First  string `json:"first"`
+			Second string `json:"second"`
+		}
+		if err = decodeArguments(call.Arguments, &arguments); err == nil {
+			err = s.swapRoles(arguments.First, arguments.Second)
 		}
 	case "set_council_size":
 		var arguments struct {
@@ -302,6 +313,33 @@ func (s *Session) assign(role string, modelNumber int) error {
 	default:
 		return errors.New("role must be king, worker, or council")
 	}
+	return nil
+}
+
+func (s *Session) swapRoles(first, second string) error {
+	first = strings.ToLower(strings.TrimSpace(first))
+	second = strings.ToLower(strings.TrimSpace(second))
+	if first == second {
+		return errors.New("choose two different roles to swap")
+	}
+	roles := &s.draft.Config.Topology.Roles
+	assignments := map[string]*topology.Assignment{
+		"king":    &roles.King,
+		"worker":  &roles.Worker,
+		"council": &roles.Council,
+	}
+	a, firstOK := assignments[first]
+	b, secondOK := assignments[second]
+	if !firstOK || !secondOK {
+		return errors.New("roles must be king, worker, or council")
+	}
+	if (first == "council" || second == "council") && !s.draft.Config.CouncilEnabled {
+		return errors.New("enable the Council before swapping its model")
+	}
+	if !a.Complete() || !b.Complete() {
+		return errors.New("both roles must have assigned models")
+	}
+	*a, *b = *b, *a
 	return nil
 }
 
