@@ -18,6 +18,7 @@ type Presentation struct {
 	ProviderNotice                                           string
 	ProviderProgress                                         localmodels.InstallProgress
 	ModelDownloadProgress                                    localmodels.DownloadProgress
+	ModelDownloadPosition, ModelDownloadCount                int
 	ModelQuery, ModelSearchWarning                           string
 	ModelSearchActive, ModelSearching                        bool
 	ModelDownloadConfirming                                  bool

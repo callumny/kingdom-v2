@@ -77,7 +77,8 @@ reported without discarding an otherwise valid King response.
 
 Press `Ctrl+R` while idle to inspect or start local runtimes as a maintenance tool. Setup itself keeps
 the main journey linear: Providers → Models → Wizard → Ready. Ollama downloads stream
-progress from its loopback API. MLX downloads use Kingdom's managed Hugging Face tooling and private cache. Kingdom
+progress from its loopback API. MLX downloads use Kingdom's managed Hugging Face tooling and private
+cache. Active downloads show model size, transfer speed, and estimated time remaining. Kingdom
 does not bind a server beyond loopback or stop provider processes; processes started by Kingdom
 intentionally continue after it exits.
 

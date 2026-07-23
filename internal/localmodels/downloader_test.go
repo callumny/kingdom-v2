@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type fakeStreamSystem struct {
@@ -35,11 +36,16 @@ func TestDownloaderStreamsExactOllamaProgress(t *testing.T) {
 		if string(body) != `{"model":"qwen3:8b","stream":true}`+"\n" {
 			t.Fatalf("body=%s", body)
 		}
-		_, _ = io.WriteString(writer, "{\"status\":\"pulling manifest\"}\n{\"status\":\"downloading\",\"completed\":25,\"total\":100}\n{\"status\":\"success\",\"completed\":100,\"total\":100}\n")
+		_, _ = io.WriteString(writer, "{\"status\":\"pulling manifest\"}\n{\"status\":\"downloading\",\"completed\":250000000,\"total\":1000000000}\n{\"status\":\"success\",\"completed\":1000000000,\"total\":1000000000}\n")
 	}))
 	defer server.Close()
 
 	downloader := NewDownloader(nil, server.Client(), "", "")
+	now := time.Unix(0, 0)
+	downloader.now = func() time.Time {
+		now = now.Add(time.Second)
+		return now
+	}
 	var progress []DownloadProgress
 	err := downloader.Download(context.Background(), DownloadRequest{Kind: KindOllama, Model: "qwen3:8b", BaseURL: server.URL}, func(update DownloadProgress) {
 		progress = append(progress, update)
@@ -50,6 +56,9 @@ func TestDownloaderStreamsExactOllamaProgress(t *testing.T) {
 	if len(progress) != 3 || progress[1].Percent != 25 || progress[2].Percent != 100 {
 		t.Fatalf("progress=%+v", progress)
 	}
+	if got := progress[1]; got.DownloadedBytes != 250_000_000 || got.TotalBytes != 1_000_000_000 || got.BytesPerSecond <= 0 || got.ETA <= 0 {
+		t.Fatalf("Ollama transfer metrics=%+v", got)
+	}
 }
 
 func TestDownloaderUsesManagedHFCommandAndParsesMLXProgress(t *testing.T) {
@@ -58,8 +67,13 @@ func TestDownloaderUsesManagedHFCommandAndParsesMLXProgress(t *testing.T) {
 	hf := filepath.Join(runtimeRoot, "mlx", "bin", "hf")
 	system := &fakeStreamSystem{path: "/fallback/hf", lines: []string{"Fetching 4 files: 25%", "Fetching 4 files: 75%"}}
 	downloader := NewDownloader(system, nil, runtimeRoot, cacheRoot)
+	now := time.Unix(0, 0)
+	downloader.now = func() time.Time {
+		now = now.Add(time.Second)
+		return now
+	}
 	var progress []DownloadProgress
-	if err := downloader.Download(context.Background(), DownloadRequest{Kind: KindMLX, Model: "mlx-community/Qwen3-4B-4bit"}, func(update DownloadProgress) {
+	if err := downloader.Download(context.Background(), DownloadRequest{Kind: KindMLX, Model: "mlx-community/Qwen3-4B-4bit", SizeBytes: 4_000_000_000}, func(update DownloadProgress) {
 		progress = append(progress, update)
 	}); err != nil {
 		t.Fatal(err)
@@ -70,6 +84,32 @@ func TestDownloaderUsesManagedHFCommandAndParsesMLXProgress(t *testing.T) {
 	}
 	if len(progress) < 4 || progress[1].Percent != 25 || progress[2].Percent != 75 || progress[len(progress)-1].Percent != 100 {
 		t.Fatalf("progress=%+v", progress)
+	}
+	if got := progress[1]; got.DownloadedBytes != 1_000_000_000 || got.TotalBytes != 4_000_000_000 || got.BytesPerSecond <= 0 || got.ETA <= 0 {
+		t.Fatalf("MLX transfer metrics=%+v", got)
+	}
+}
+
+func TestDownloaderResolvesSelectedMLXModelSizeBeforeDownload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/models/mlx-community/Qwen3-4B-4bit" {
+			t.Fatalf("metadata path=%q", request.URL.Path)
+		}
+		_, _ = io.WriteString(writer, `{"usedStorage":4000000000}`)
+	}))
+	defer server.Close()
+
+	system := &fakeStreamSystem{lines: []string{"Fetching 4 files: 25%"}}
+	downloader := NewDownloader(system, server.Client(), t.TempDir(), t.TempDir())
+	downloader.huggingURL = server.URL + "/api/models"
+	var progress []DownloadProgress
+	if err := downloader.Download(context.Background(), DownloadRequest{Kind: KindMLX, Model: "mlx-community/Qwen3-4B-4bit"}, func(update DownloadProgress) {
+		progress = append(progress, update)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(progress) < 2 || progress[1].TotalBytes != 4_000_000_000 || progress[1].DownloadedBytes != 1_000_000_000 {
+		t.Fatalf("resolved MLX progress=%+v", progress)
 	}
 }
 

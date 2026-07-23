@@ -85,6 +85,8 @@ type Model struct {
 	modelDownloader         ModelDownloader
 	modelDownloadActive     bool
 	modelDownloadProgress   localmodels.DownloadProgress
+	modelDownloadPosition   int
+	modelDownloadCount      int
 	modelDownloadError      string
 	modelDownloadCh         <-chan modelDownloadEvent
 	modelDownloadGen        uint64
@@ -204,6 +206,8 @@ type modelSearchMsg struct {
 
 type modelDownloadEvent struct {
 	progress  *localmodels.DownloadProgress
+	position  int
+	count     int
 	installed *setup.ModelRef
 	done      bool
 	err       error
@@ -403,6 +407,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if x.event.progress != nil {
 			m.modelDownloadProgress = *x.event.progress
+			m.modelDownloadPosition = x.event.position
+			m.modelDownloadCount = x.event.count
 			return m, m.nextModelDownloadEvent()
 		}
 		if x.event.installed != nil {
@@ -1175,6 +1181,8 @@ func (m Model) presentation() ui.Presentation {
 		ModelDownloadConfirming: m.modelDownloadConfirming,
 		ModelDownloadActive:     m.modelDownloadActive,
 		ModelDownloadProgress:   m.modelDownloadProgress,
+		ModelDownloadPosition:   m.modelDownloadPosition,
+		ModelDownloadCount:      m.modelDownloadCount,
 		ModelDownloadError:      m.modelDownloadError,
 		ModelRemoveConfirming:   m.modelRemoveConfirming,
 		ModelRemoveActive:       m.modelRemoveActive,

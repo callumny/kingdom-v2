@@ -21,7 +21,15 @@ func (m Model) beginModelDownloads() (tea.Model, tea.Cmd) {
 	m.modelDownloadGen++
 	m.modelDownloadActive = true
 	m.modelDownloadError = ""
-	m.modelDownloadProgress = localmodels.DownloadProgress{Model: pending[0].Ref.ModelID, Status: "Preparing model download", Percent: 0}
+	firstKind, _ := localKindForEndpoint(pending[0].Ref.EndpointID)
+	m.modelDownloadProgress = localmodels.DownloadProgress{
+		Provider:   firstKind,
+		Model:      pending[0].Ref.ModelID,
+		Status:     "Preparing model download",
+		TotalBytes: pending[0].SizeBytes,
+	}
+	m.modelDownloadPosition = 1
+	m.modelDownloadCount = len(pending)
 	generation := m.modelDownloadGen
 	ctx, cancel := context.WithCancel(context.Background())
 	m.modelDownloadCancel = cancel
@@ -38,16 +46,17 @@ func (m Model) beginModelDownloads() (tea.Model, tea.Cmd) {
 				return false
 			}
 		}
-		for _, option := range pending {
+		for index, option := range pending {
 			kind, ok := localKindForEndpoint(option.Ref.EndpointID)
 			if !ok {
 				emit(modelDownloadEvent{done: true, err: fmt.Errorf("unsupported model provider %q", option.Ref.EndpointID)})
 				return
 			}
-			request := localmodels.DownloadRequest{Kind: kind, Model: option.Ref.ModelID, BaseURL: option.Endpoint.BaseURL}
+			request := localmodels.DownloadRequest{Kind: kind, Model: option.Ref.ModelID, BaseURL: option.Endpoint.BaseURL, SizeBytes: option.SizeBytes}
 			err := downloader.Download(ctx, request, func(progress localmodels.DownloadProgress) {
 				value := progress
-				emit(modelDownloadEvent{progress: &value})
+				value.Provider = kind
+				emit(modelDownloadEvent{progress: &value, position: index + 1, count: len(pending)})
 			})
 			if err != nil {
 				emit(modelDownloadEvent{done: true, err: fmt.Errorf("download %s: %w", option.Ref.ModelID, err)})

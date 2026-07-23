@@ -3,7 +3,9 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/callumny/kingdom/internal/localmodels"
 	"github.com/callumny/kingdom/internal/setup"
 )
 
@@ -104,15 +106,24 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 		if status == "" {
 			status = "Preparing model download"
 		}
+		provider := downloadProviderLabel(p.ModelDownloadProgress.Provider)
+		position := "Downloading selected model"
+		if p.ModelDownloadPosition > 0 && p.ModelDownloadCount > 0 {
+			position = fmt.Sprintf("Model %d of %d", p.ModelDownloadPosition, p.ModelDownloadCount)
+		}
 		body := []string{
 			royalBrand.Render("Preparing your models"),
 			"",
+			royalGold.Render(position),
+			royalText.Render(provider + " · " + p.ModelDownloadProgress.Model),
+			"",
 			royalCyan.Render(fmt.Sprintf("%s · %d%%", status, p.ModelDownloadProgress.Percent)),
 			providerProgressBar(p.ModelDownloadProgress.Percent, 100),
-			royalMuted.Render(p.ModelDownloadProgress.Model),
+			royalText.Render(downloadSizeSummary(p.ModelDownloadProgress)),
+			royalText.Render(downloadTimeSummary(p.ModelDownloadProgress)),
 			"",
-			royalMuted.Render("Kingdom will test your selected models after every download is ready."),
 		}
+		body = append(body, styledParagraph("When every download is ready, Kingdom opens the Wizard automatically to complete setup.", 88, royalMuted)...)
 		return body, royalMuted.Render("Downloading selected models…")
 	}
 	searching := p.ModelSearchActive || p.ModelQuery != ""
@@ -124,6 +135,10 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	}
 	body := []string{royalBrand.Render(title), ""}
 	body = append(body, styledParagraph(description, 88, royalMuted)...)
+	if p.ModelDownloadError != "" {
+		body = append(body, "", royalRed.Render("Download failed: "+p.ModelDownloadError))
+		body = append(body, royalMuted.Render("Press Enter to review and retry the missing model downloads."))
+	}
 	if p.ModelInventoryLoading {
 		body = append(body, "", royalCyan.Render("Checking installed models across your selected providers…"))
 		return body, royalMuted.Render("Checking installed models…   •   Esc Back")
@@ -184,6 +199,17 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	return body, royalMuted.Render(footer)
 }
 
+func downloadProviderLabel(provider localmodels.Kind) string {
+	switch provider {
+	case localmodels.KindOllama:
+		return "Ollama"
+	case localmodels.KindMLX:
+		return "MLX"
+	default:
+		return "Local model"
+	}
+}
+
 func modelRemoveConfirmation(wf *setup.Workflow, option setup.ModelOption) ([]string, string) {
 	provider := modelProviderLabel(option)
 	body := []string{
@@ -230,9 +256,69 @@ func modelDownloadConfirmation(wf *setup.Workflow) ([]string, string) {
 	body = append(body,
 		"",
 		royalGold.Render("What happens next"),
-		royalMuted.Render("Kingdom waits for every download, then briefly tests the selected models and opens the Wizard."),
+		royalMuted.Render("Kingdom waits for every download, then opens the Wizard to complete setup."),
 	)
 	return body, royalMuted.Render("Enter / y Confirm and continue   •   Esc / n Back")
+}
+
+func downloadSizeSummary(progress localmodels.DownloadProgress) string {
+	if progress.TotalBytes > 0 {
+		return fmt.Sprintf("%s / %s", formatDownloadBytes(progress.DownloadedBytes), formatDownloadBytes(progress.TotalBytes))
+	}
+	if progress.DownloadedBytes > 0 {
+		return formatDownloadBytes(progress.DownloadedBytes) + " downloaded · total size calculating…"
+	}
+	return "Download size calculating…"
+}
+
+func downloadTimeSummary(progress localmodels.DownloadProgress) string {
+	if progress.BytesPerSecond <= 0 {
+		return "Speed and time remaining calculating…"
+	}
+	summary := formatDownloadBytes(progress.BytesPerSecond) + "/s"
+	if progress.Provider == localmodels.KindMLX {
+		summary = "Estimated " + summary
+	}
+	if progress.ETA > 0 {
+		summary += " · " + formatDownloadETA(progress.ETA) + " remaining"
+	}
+	return summary
+}
+
+func formatDownloadBytes(bytes int64) string {
+	if bytes < 0 {
+		bytes = 0
+	}
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	value := float64(bytes)
+	unit := 0
+	for value >= 1000 && unit < len(units)-1 {
+		value /= 1000
+		unit++
+	}
+	if unit == 0 {
+		return fmt.Sprintf("%d %s", bytes, units[unit])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unit])
+}
+
+func formatDownloadETA(duration time.Duration) string {
+	duration = duration.Round(time.Second)
+	if duration < time.Second {
+		return "<1s"
+	}
+	hours := int(duration / time.Hour)
+	duration -= time.Duration(hours) * time.Hour
+	minutes := int(duration / time.Minute)
+	duration -= time.Duration(minutes) * time.Minute
+	seconds := int(duration / time.Second)
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func installedResultsSummary(catalog []setup.ModelOption) string {

@@ -19,8 +19,11 @@ pieces of state:
 Provider-specific behavior stays behind injected interfaces. Ollama downloads through its configured
 loopback `/api/pull` endpoint. MLX downloads through the `hf` executable in Kingdom's managed Python
 environment into Kingdom's Hugging Face cache. Both emit the same typed progress value to the
-application. Downloads remain on Models and must complete before the Wizard opens. A failed
-download is visible and blocks progression.
+application. The active model shows its queue position, downloaded and total bytes, transfer speed,
+and estimated time remaining. MLX resolves the selected repository's storage size immediately before
+download so fuzzy search stays fast; unavailable metrics are labelled as still calculating. Downloads
+remain on Models and must complete before the Wizard opens. A failed download is visible and blocks
+progression.
 
 The same Models screen owns uninstalling. `d` acts only on an installed row and opens a confirmation
 before any files are removed. Ollama removal uses its configured loopback `/api/delete` endpoint. MLX
