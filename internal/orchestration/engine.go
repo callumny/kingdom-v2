@@ -158,10 +158,12 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 			fail(err)
 			return
 		}
-		if ca := e.cfg.Topology.EffectiveCouncil(); ca != nil {
-			if _, _, err = e.endpoint(*ca); err != nil {
-				fail(err)
-				return
+		if e.cfg.CouncilEnabled {
+			if ca := e.cfg.Topology.EffectiveCouncil(); ca != nil {
+				if _, _, err = e.endpoint(*ca); err != nil {
+					fail(err)
+					return
+				}
 			}
 		}
 		recall := ""
@@ -236,10 +238,13 @@ func (e *Engine) Stream(ctx context.Context, prompt string) <-chan Event {
 				if ctx.Err() != nil {
 					return
 				}
-				emit(Event{Type: EventCouncilReviewing})
-				reviews := e.runCouncil(ctx, prompt, workers, emit)
-				if ctx.Err() != nil {
-					return
+				var reviews []string
+				if e.cfg.CouncilEnabled {
+					emit(Event{Type: EventCouncilReviewing})
+					reviews = e.runCouncil(ctx, prompt, workers, emit)
+					if ctx.Err() != nil {
+						return
+					}
 				}
 				feedback = append(feedback, formatOutcomes(workers, reviews))
 				emit(Event{Type: EventKingThinking})
@@ -439,6 +444,9 @@ func (e *Engine) runWorkers(ctx context.Context, tasks []task, emit func(Event))
 	return res
 }
 func (e *Engine) runCouncil(ctx context.Context, prompt string, w []taskResult, emit func(Event)) []string {
+	if !e.cfg.CouncilEnabled {
+		return nil
+	}
 	a := e.cfg.Topology.EffectiveCouncil()
 	if a == nil {
 		return nil

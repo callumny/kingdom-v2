@@ -133,6 +133,44 @@ func TestRecordedRoleRoutingAndSynthesisContext(t *testing.T) {
 		t.Fatalf("calls=%+v", calls)
 	}
 }
+
+func TestDisabledCouncilSkipsReviewsAndReviewEvent(t *testing.T) {
+	c := cfg()
+	c.CouncilEnabled = false
+	kingCalls := 0
+	councilCalls := 0
+	f := &recordingClient{script: func(call recordedCall) (string, error, time.Duration) {
+		switch {
+		case isKingCall(call):
+			kingCalls++
+			if kingCalls == 1 {
+				return `{"type":"delegate","tasks":[{"id":"a","prompt":"task"}]}`, nil, 0
+			}
+			return `{"type":"final","content":"done"}`, nil, 0
+		case call.role == "You are a Worker. Solve the assigned task.":
+			return "worker result", nil, 0
+		case call.role == "You are a Council reviewer. Review worker outcomes.":
+			councilCalls++
+			return "unexpected review", nil, 0
+		default:
+			return "", errors.New("unexpected call"), 0
+		}
+	}}
+	sawCouncilEvent := false
+	for event := range NewEngine(c, f).Stream(context.Background(), "original prompt") {
+		if event.Type == EventCouncilReviewing {
+			sawCouncilEvent = true
+		}
+	}
+	calls := f.snapshot()
+	if councilCalls != 0 || sawCouncilEvent {
+		t.Fatalf("council calls=%d event=%v calls=%+v", councilCalls, sawCouncilEvent, calls)
+	}
+	if len(calls) != 3 || !strings.Contains(calls[2].user, "worker result") {
+		t.Fatalf("calls=%+v", calls)
+	}
+}
+
 func TestWorkerConcurrencyActuallyBoundedAndParallel(t *testing.T) {
 	c := cfg()
 	c.WorkerConcurrency = 2
