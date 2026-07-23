@@ -61,6 +61,26 @@ func TestModelsViewAdvertisesUninstallWithoutClippingNavigation(t *testing.T) {
 	}
 }
 
+func TestModelsViewRecommendsMLXPerformanceOnlyWhenEnabled(t *testing.T) {
+	withMLX := config.Default()
+	withMLX.Providers.MLX.Enabled = true
+	draft := setup.NewDraft(withMLX, nil)
+	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
+	view := ViewWithPresentation(100, 32, true, w, Presentation{}).Content
+	if !strings.Contains(view, "MLX models generally run faster on Apple silicon") {
+		t.Fatalf("MLX Apple silicon guidance missing: %s", view)
+	}
+
+	ollamaOnly := config.Default()
+	ollamaOnly.Providers.Ollama.Enabled = true
+	draft = setup.NewDraft(ollamaOnly, nil)
+	w = &setup.Workflow{State: setup.StateModels, Draft: draft}
+	view = ViewWithPresentation(100, 32, true, w, Presentation{}).Content
+	if strings.Contains(view, "MLX models generally run faster on Apple silicon") {
+		t.Fatalf("MLX guidance shown when MLX is disabled: %s", view)
+	}
+}
+
 func TestModelsViewGivesSearchResultsTheirOwnHierarchy(t *testing.T) {
 	draft := setup.NewDraft(config.Default(), nil)
 	draft.ReplaceCatalog([]setup.ModelOption{

@@ -135,6 +135,10 @@ func modelsSetupView(wf *setup.Workflow, p Presentation, height int) ([]string, 
 	}
 	body := []string{royalBrand.Render(title), ""}
 	body = append(body, styledParagraph(description, 88, royalMuted)...)
+	if wf.Draft.Config.Providers.MLX.Enabled {
+		body = append(body, "")
+		body = append(body, styledParagraph("Tip: MLX models generally run faster on Apple silicon and are optimized for compatible Macs.", 88, royalCyan)...)
+	}
 	if p.ModelDownloadError != "" {
 		body = append(body, "", royalRed.Render("Download failed: "+p.ModelDownloadError))
 		body = append(body, royalMuted.Render("Press Enter to review and retry the missing model downloads."))
