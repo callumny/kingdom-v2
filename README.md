@@ -69,15 +69,20 @@ provider is ready.
 
 ### 2. Choose models
 
-Installed Ollama and MLX models appear together and are prioritised in the list. Press `/` to search
-both enabled providers, then select up to three models with `Space`. Missing models are downloaded
-only after confirmation.
+Installed Ollama and MLX models appear first in one aligned list. Below them, Kingdom shows separate
+**Popular on Ollama** and **Popular on MLX** sections, so useful defaults are easy to browse without
+mixing the two providers together. Popularity is ranked independently for each provider.
+
+Press `/` to fuzzy-search both enabled providers, then select up to three models with `Space`.
+Missing models are downloaded only after confirmation. MLX models are discovered through compatible
+repositories on Hugging Face; on Apple silicon, they generally run faster and are the recommended
+MLX option.
 
 During a download, Kingdom shows the active model, queue position, downloaded and total size,
 transfer speed, progress, and estimated time remaining. When every model is ready, Kingdom opens the
 Wizard.
 
-![Kingdom model selection with Ollama and MLX models](docs/images/setup-models.png)
+![Kingdom model selection with installed models and separate popular Ollama and MLX sections](docs/images/setup-models.png)
 
 ### 3. Finish with the Wizard
 
@@ -98,8 +103,9 @@ apply the proposal and launch Kingdom. Press `Tab` at any time to use the model-
 ## Main prompt
 
 The main screen keeps the conversation on the left and live model activity on the right. Each model
-shows its assigned roles, current state, and measured tokens per second after it has generated text.
-Write a prompt and press `Ctrl+Enter` to send it; press `Esc` to cancel a running response.
+shows its provider, assigned roles, current state, and measured tokens per second after it has
+generated text. Write a prompt and press `Ctrl+Enter` to send it; press `Esc` to cancel a running
+response.
 
 ![Kingdom main prompt with conversation and model activity panels](docs/images/main-prompt.png)
 
