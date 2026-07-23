@@ -65,7 +65,7 @@ Kingdom checks which local providers are available. Enable Ollama, MLX, or both.
 provider is missing, press `i` and confirm the installation. You cannot continue until every enabled
 provider is ready.
 
-<!-- Screenshot: docs/images/setup-providers.png -->
+![Kingdom provider setup showing Ollama and MLX](docs/images/setup-providers.png)
 
 ### 2. Choose models
 
@@ -77,7 +77,7 @@ During a download, Kingdom shows the active model, queue position, downloaded an
 transfer speed, progress, and estimated time remaining. When every model is ready, Kingdom opens the
 Wizard.
 
-<!-- Screenshot: docs/images/setup-models.png -->
+![Kingdom model selection with Ollama and MLX models](docs/images/setup-models.png)
 
 ### 3. Finish with the Wizard
 
@@ -93,7 +93,7 @@ Ask the Wizard to change a role assignment, enable or disable the Council, adjus
 concurrent Workers, change ports, or choose shared versus separate Ollama servers. Press `Enter` to
 apply the proposal and launch Kingdom. Press `Tab` at any time to use the model-free manual setup.
 
-<!-- Screenshot: docs/images/setup-wizard.png -->
+![Kingdom setup Wizard showing role guidance and the proposed configuration](docs/images/setup-wizard.png)
 
 ## Main prompt
 
@@ -101,7 +101,7 @@ The main screen keeps the conversation on the left and live model activity on th
 shows its assigned roles, current state, and measured tokens per second after it has generated text.
 Write a prompt and press `Ctrl+Enter` to send it; press `Esc` to cancel a running response.
 
-<!-- Screenshot: docs/images/main-prompt.png -->
+![Kingdom main prompt with conversation and model activity panels](docs/images/main-prompt.png)
 
 ### Commands
 
