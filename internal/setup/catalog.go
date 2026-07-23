@@ -24,13 +24,15 @@ func (r ModelRef) Assignment() topology.Assignment {
 // Endpoint keeps the routing information; the remaining fields are optional
 // presentation metadata supplied by discovery.
 type ModelOption struct {
-	Ref           ModelRef
-	Endpoint      topology.Endpoint
-	Installed     bool
-	SizeBytes     int64
-	Family        string
-	ParameterSize string
-	Quantization  string
+	Ref                 ModelRef
+	Endpoint            topology.Endpoint
+	Installed           bool
+	SizeBytes           int64
+	Family              string
+	ParameterSize       string
+	Quantization        string
+	PopularityRank      int
+	PopularityDownloads int64
 }
 
 // Catalog returns the choices supplied by the application boundary. Keeping

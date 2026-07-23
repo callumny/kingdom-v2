@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -48,6 +49,7 @@ func (m Model) handleModelsKey(key string) (tea.Model, tea.Cmd) {
 		case "esc":
 			if m.modelQuery == "" {
 				m.modelSearchActive = false
+				m.replaceVisibleModels(m.popularModels)
 				return m, nil
 			}
 			m.modelQuery = ""
@@ -150,6 +152,9 @@ func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
 	m.modelCursor = 0
 	m.modelQuery = ""
 	m.modelSearchActive = false
+	m.cancelPopularModels()
+	m.popularModels = nil
+	m.modelPopularWarning = ""
 	m.modelDownloadConfirming = false
 	m.modelRemoveConfirming = false
 	m.modelRemoveTarget = setup.ModelOption{}
@@ -162,6 +167,53 @@ func (m Model) beginModelInventory() (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) beginPopularModels() (Model, tea.Cmd) {
+	m.cancelPopularModels()
+	m.modelPopularGen++
+	generation := m.modelPopularGen
+	m.modelPopularWarning = ""
+	providers := m.enabledModelProviders()
+	if m.modelPopular == nil || len(providers) == 0 {
+		m.modelPopularLoading = false
+		return m, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	m.modelPopularCancel = cancel
+	m.modelPopularLoading = true
+	source := m.modelPopular
+	return m, func() tea.Msg {
+		type providerResult struct {
+			provider modelcatalog.Provider
+			models   []modelcatalog.Model
+			err      error
+		}
+		results := make(chan providerResult, len(providers))
+		for _, provider := range providers {
+			go func(provider modelcatalog.Provider) {
+				models, err := source.Popular(ctx, provider, 3)
+				results <- providerResult{provider: provider, models: models, err: err}
+			}(provider)
+		}
+		message := modelPopularMsg{generation: generation}
+		byProvider := make(map[modelcatalog.Provider]providerResult, len(providers))
+		for range providers {
+			result := <-results
+			byProvider[result.provider] = result
+		}
+		for _, provider := range providers {
+			result := byProvider[provider]
+			if result.err != nil {
+				if ctx.Err() == nil {
+					message.warnings = append(message.warnings, fmt.Sprintf("%s popularity temporarily unavailable", providerLabel(result.provider)))
+				}
+				continue
+			}
+			message.models = append(message.models, result.models...)
+		}
+		return message
+	}
+}
+
 func (m Model) beginModelSearch() (tea.Model, tea.Cmd) {
 	m.cancelModelSearch()
 	m.modelSearchGen++
@@ -170,6 +222,7 @@ func (m Model) beginModelSearch() (tea.Model, tea.Cmd) {
 	m.replaceVisibleModels(nil)
 	if strings.TrimSpace(m.modelQuery) == "" || m.modelSearch == nil {
 		m.modelSearching = false
+		m.replaceVisibleModels(m.popularModels)
 		return m, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -214,6 +267,14 @@ func (m *Model) cancelModelSearch() {
 	m.modelSearching = false
 }
 
+func (m *Model) cancelPopularModels() {
+	if m.modelPopularCancel != nil {
+		m.modelPopularCancel()
+	}
+	m.modelPopularCancel = nil
+	m.modelPopularLoading = false
+}
+
 func (m Model) enabledModelProviders() []modelcatalog.Provider {
 	providers := make([]modelcatalog.Provider, 0, 2)
 	if m.workflow.Draft.Config.Providers.Ollama.Enabled {
@@ -245,7 +306,15 @@ func (m *Model) replaceVisibleModels(remote []modelcatalog.Model) {
 			options = append(options, installedOption)
 			continue
 		}
-		options = append(options, setup.ModelOption{Ref: ref, Endpoint: m.configuredEndpoint(endpointID), Installed: false})
+		options = append(options, setup.ModelOption{
+			Ref:                 ref,
+			Endpoint:            m.configuredEndpoint(endpointID),
+			Installed:           false,
+			SizeBytes:           model.SizeBytes,
+			ParameterSize:       model.ParameterSize,
+			PopularityRank:      model.PopularityRank,
+			PopularityDownloads: model.Downloads,
+		})
 	}
 	m.workflow.Draft.ReplaceCatalog(options)
 }

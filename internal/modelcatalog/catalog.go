@@ -18,9 +18,13 @@ type Identity struct {
 }
 
 type Model struct {
-	Provider  Provider
-	ID        string
-	Installed bool
+	Provider       Provider
+	ID             string
+	Installed      bool
+	PopularityRank int
+	Downloads      int64
+	ParameterSize  string
+	SizeBytes      int64
 }
 
 func (m Model) Identity() Identity { return Identity{Provider: m.Provider, ID: m.ID} }
@@ -47,6 +51,21 @@ func MergeAndFilter(installed, remote []Model, query string, limit int) []Model 
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].Installed != models[j].Installed {
 			return models[i].Installed
+		}
+		if !models[i].Installed {
+			leftPopular := models[i].PopularityRank > 0
+			rightPopular := models[j].PopularityRank > 0
+			if leftPopular != rightPopular {
+				return leftPopular
+			}
+			if leftPopular && rightPopular {
+				if models[i].Provider != models[j].Provider {
+					return models[i].Provider == Ollama
+				}
+				if models[i].PopularityRank != models[j].PopularityRank {
+					return models[i].PopularityRank < models[j].PopularityRank
+				}
+			}
 		}
 		left, right := strings.ToLower(models[i].ID), strings.ToLower(models[j].ID)
 		leftPrefix, rightPrefix := strings.HasPrefix(left, query), strings.HasPrefix(right, query)

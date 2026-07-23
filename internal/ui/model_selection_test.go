@@ -78,6 +78,100 @@ func TestModelsViewGivesSearchResultsTheirOwnHierarchy(t *testing.T) {
 	}
 }
 
+func TestModelsViewGroupsPopularDownloadsByProvider(t *testing.T) {
+	draft := setup.NewDraft(config.Default(), nil)
+	draft.ReplaceCatalog([]setup.ModelOption{
+		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "llama3.1:8b"}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"}, Installed: true, ParameterSize: "8B"},
+		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "deepseek-r1:8b"}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"}, ParameterSize: "8B", PopularityRank: 1, PopularityDownloads: 90_300_000},
+		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "llama3.2"}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"}, ParameterSize: "3B", PopularityRank: 2, PopularityDownloads: 77_500_000},
+		{Ref: setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: "mlx-community/Qwen3-8B-4bit"}, Endpoint: topology.Endpoint{ID: setup.MLXEndpointID, Name: "MLX"}, ParameterSize: "8B", PopularityRank: 1, PopularityDownloads: 900_000},
+		{Ref: setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: "mlx-community/Qwen3-4B-4bit"}, Endpoint: topology.Endpoint{ID: setup.MLXEndpointID, Name: "MLX"}, ParameterSize: "4B", PopularityRank: 2, PopularityDownloads: 600_000},
+	})
+	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
+
+	view := ViewWithPresentation(120, 42, true, w, Presentation{}).Content
+	for _, want := range []string{
+		"Installed models",
+		"Popular downloads",
+		"Popular on Ollama",
+		"Popular on MLX",
+		"deepseek-r1:8b",
+		"mlx-community/Qwen3-8B-4bit",
+		"#1 popular available",
+		"90.3M pulls",
+		"900K downloads",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("popular models view missing %q: %s", want, view)
+		}
+	}
+	installed := strings.Index(view, "llama3.1:8b")
+	ollamaHeading := strings.Index(view, "Popular on Ollama")
+	ollamaLast := strings.Index(view, "llama3.2")
+	mlxHeading := strings.Index(view, "Popular on MLX")
+	mlxFirst := strings.Index(view, "mlx-community/Qwen3-8B-4bit")
+	if !(installed < ollamaHeading && ollamaHeading < ollamaLast && ollamaLast < mlxHeading && mlxHeading < mlxFirst) {
+		t.Fatalf("popular provider groups are interwoven: %s", view)
+	}
+}
+
+func TestModelsViewShowsNonBlockingPopularLoadingAndWarnings(t *testing.T) {
+	draft := setup.NewDraft(config.Default(), nil)
+	draft.ReplaceCatalog([]setup.ModelOption{{
+		Ref:       setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "llama3.1:8b"},
+		Endpoint:  topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+		Installed: true,
+	}})
+	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
+
+	loading := ViewWithPresentation(100, 32, true, w, Presentation{ModelPopularLoading: true}).Content
+	if !strings.Contains(loading, "Finding popular Ollama and MLX models") || !strings.Contains(loading, "llama3.1:8b") {
+		t.Fatalf("popular loading blocked installed models: %s", loading)
+	}
+	warning := ViewWithPresentation(100, 32, true, w, Presentation{ModelPopularWarning: "MLX popularity temporarily unavailable"}).Content
+	if !strings.Contains(warning, "MLX popularity temporarily unavailable") || !strings.Contains(warning, "Press / to search") {
+		t.Fatalf("popular warning missing fallback: %s", warning)
+	}
+}
+
+func TestModelsViewShowsTheCompletePopularCatalogueAtPresentationHeight(t *testing.T) {
+	draft := setup.NewDraft(config.Default(), nil)
+	options := make([]setup.ModelOption, 0, 12)
+	for index := 1; index <= 6; index++ {
+		options = append(options, setup.ModelOption{
+			Ref:       setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: fmt.Sprintf("installed-%d", index)},
+			Endpoint:  topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+			Installed: true,
+		})
+	}
+	for index := 1; index <= 3; index++ {
+		options = append(options, setup.ModelOption{
+			Ref:            setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: fmt.Sprintf("popular-ollama-%d", index)},
+			Endpoint:       topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+			PopularityRank: index,
+		})
+	}
+	for index := 1; index <= 3; index++ {
+		options = append(options, setup.ModelOption{
+			Ref:            setup.ModelRef{EndpointID: setup.MLXEndpointID, ModelID: fmt.Sprintf("mlx-community/popular-model-%d-4bit", index)},
+			Endpoint:       topology.Endpoint{ID: setup.MLXEndpointID, Name: "MLX"},
+			PopularityRank: index,
+		})
+	}
+	draft.ReplaceCatalog(options)
+	w := &setup.Workflow{State: setup.StateModels, Draft: draft}
+
+	view := ViewWithPresentation(187, 49, true, w, Presentation{}).Content
+	for _, want := range []string{"installed-6", "Popular on Ollama", "popular-ollama-3", "Popular on MLX", "mlx-community/popular-model-3-4bit", "Enter Continue"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("full models screen missing %q: %s", want, view)
+		}
+	}
+	if strings.Contains(view, "Showing 1–") {
+		t.Fatalf("presentation-height screen unnecessarily windowed the catalogue: %s", view)
+	}
+}
+
 func TestModelsViewSummarisesACompleteMixedSelection(t *testing.T) {
 	draft := setup.NewDraft(config.Default(), nil)
 	options := []setup.ModelOption{

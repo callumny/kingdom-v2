@@ -83,7 +83,7 @@ func providerProgressBar(completed, total int) string {
 	return royalGreen.Render("["+strings.Repeat("█", filled)) + royalMuted.Render(strings.Repeat("░", width-filled)+fmt.Sprintf("] %d%%", percent))
 }
 
-func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
+func modelsSetupView(wf *setup.Workflow, p Presentation, height int) ([]string, string) {
 	selected := wf.Draft.SelectedModels()
 	if p.ModelRemoveConfirming {
 		return modelRemoveConfirmation(wf, p.ModelRemoveTarget)
@@ -164,16 +164,28 @@ func modelsSetupView(wf *setup.Workflow, p Presentation) ([]string, string) {
 	}
 	if searching && p.ModelQuery != "" {
 		body = append(body, searchResultsSummary(catalog, p.ModelQuery))
+		body = append(body, modelTableHeader())
 	} else {
 		body = append(body, installedResultsSummary(catalog))
 	}
-	body = append(body, modelTableHeader())
-	start, end := modelWindow(len(catalog), p.ModelCursor)
-	for offset, option := range catalog[start:end] {
-		index := start + offset
-		body = append(body, modelOptionRow(option, index == p.ModelCursor, wf.Draft.IsModelSelected(option.Ref)))
+	start, end := modelWindowForHeight(len(catalog), p.ModelCursor, height)
+	if searching && p.ModelQuery != "" {
+		for offset, option := range catalog[start:end] {
+			index := start + offset
+			body = append(body, modelOptionRow(option, index == p.ModelCursor, wf.Draft.IsModelSelected(option.Ref)))
+		}
+	} else {
+		body = append(body, groupedModelRows(catalog, start, end, p.ModelCursor, wf.Draft.IsModelSelected)...)
+		if p.ModelPopularLoading {
+			body = append(body, "", royalText.Render("Popular downloads"))
+			body = append(body, royalCyan.Render("Finding popular Ollama and MLX models…"))
+		}
+		if p.ModelPopularWarning != "" {
+			body = append(body, "", royalGold.Render(p.ModelPopularWarning))
+			body = append(body, royalMuted.Render("Popular models are optional. Press / to search for any model."))
+		}
 	}
-	if len(catalog) > modelWindowSize {
+	if start > 0 || end < len(catalog) {
 		body = append(body, "", royalMuted.Render(fmt.Sprintf("Showing %d–%d of %d", start+1, end, len(catalog))))
 	}
 	if len(catalog) == 0 && !p.Scanning {
@@ -322,7 +334,13 @@ func formatDownloadETA(duration time.Duration) string {
 }
 
 func installedResultsSummary(catalog []setup.ModelOption) string {
-	return royalText.Render("Installed models") + "  " + royalMuted.Render(fmt.Sprintf("%d found across %d providers", len(catalog), providerCount(catalog)))
+	installed := make([]setup.ModelOption, 0, len(catalog))
+	for _, option := range catalog {
+		if option.Installed {
+			installed = append(installed, option)
+		}
+	}
+	return royalText.Render("Installed models") + "  " + royalMuted.Render(fmt.Sprintf("%d found across %d providers", len(installed), providerCount(installed)))
 }
 
 func searchResultsSummary(catalog []setup.ModelOption, query string) string {
@@ -384,7 +402,56 @@ func modelOptionRow(option setup.ModelOption, focused, selected bool) string {
 		provider = option.Ref.EndpointID
 	}
 	providerColumn := royalCyan.Render(fmt.Sprintf("%-10s", provider))
-	return pointer + border + " " + royalText.Render(checked) + " " + providerColumn + " " + state + " " + royalText.Render(option.Ref.ModelID) + "  " + royalMuted.Render(modelMetadata(option))
+	row := pointer + border + " " + royalText.Render(checked) + " " + providerColumn + " " + state + " " + royalText.Render(option.Ref.ModelID)
+	metadata := modelMetadata(option)
+	if option.PopularityRank > 0 && len([]rune(option.Ref.ModelID)) >= 24 {
+		return row
+	}
+	return row + "  " + royalMuted.Render(metadata)
+}
+
+func groupedModelRows(catalog []setup.ModelOption, start, end, cursor int, selected func(setup.ModelRef) bool) []string {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(catalog) {
+		end = len(catalog)
+	}
+	if start >= end {
+		return nil
+	}
+	rows := make([]string, 0, end-start+10)
+	installedHeader := false
+	popularHeader := false
+	currentProvider := ""
+	for index := start; index < end; index++ {
+		option := catalog[index]
+		if option.Installed {
+			if !installedHeader {
+				rows = append(rows, modelTableHeader())
+				installedHeader = true
+			}
+		} else if option.PopularityRank > 0 {
+			if !popularHeader {
+				rows = append(rows, "", royalText.Render("Popular downloads"))
+				rows = append(rows, styledParagraph("Not sure what to choose? These are widely downloaded compatible models. Popularity is measured separately for each provider.", 88, royalMuted)...)
+				popularHeader = true
+			}
+			provider := modelProviderLabel(option)
+			if provider != currentProvider {
+				rows = append(rows, "", royalText.Render("Popular on "+provider), modelTableHeader())
+				currentProvider = provider
+			}
+		} else if !installedHeader {
+			rows = append(rows, modelTableHeader())
+			installedHeader = true
+		}
+		rows = append(rows, modelOptionRow(option, index == cursor, selected(option.Ref)))
+		if option.PopularityRank > 0 && len([]rune(option.Ref.ModelID)) >= 24 {
+			rows = append(rows, strings.Repeat(" ", 30)+royalMuted.Render(modelMetadata(option)))
+		}
+	}
+	return rows
 }
 
 func modelTableHeader() string {
@@ -422,23 +489,40 @@ func providerLabels(catalog []setup.ModelOption) []string {
 const modelWindowSize = 8
 
 func modelWindow(total, cursor int) (start, end int) {
-	if total <= modelWindowSize {
+	return modelWindowSized(total, cursor, modelWindowSize)
+}
+
+func modelWindowForHeight(total, cursor, height int) (start, end int) {
+	size := modelWindowSize
+	if height >= 46 {
+		size = 12
+	} else if height > 0 && height < 36 {
+		size = height - 28
+		if size < 3 {
+			size = 3
+		}
+	}
+	return modelWindowSized(total, cursor, size)
+}
+
+func modelWindowSized(total, cursor, size int) (start, end int) {
+	if total <= size {
 		return 0, total
 	}
-	start = cursor - modelWindowSize/2
+	start = cursor - size/2
 	if start < 0 {
 		start = 0
 	}
-	end = start + modelWindowSize
+	end = start + size
 	if end > total {
 		end = total
-		start = end - modelWindowSize
+		start = end - size
 	}
 	return start, end
 }
 
 func modelMetadata(option setup.ModelOption) string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 5)
 	if option.ParameterSize != "" {
 		parts = append(parts, option.ParameterSize)
 	}
@@ -448,10 +532,37 @@ func modelMetadata(option setup.ModelOption) string {
 	if option.Quantization != "" {
 		parts = append(parts, option.Quantization)
 	}
+	if option.PopularityRank > 0 {
+		parts = append(parts, fmt.Sprintf("#%d popular available", option.PopularityRank))
+	}
+	if option.PopularityDownloads > 0 {
+		label := "downloads"
+		if strings.EqualFold(modelProviderLabel(option), "Ollama") {
+			label = "pulls"
+		}
+		parts = append(parts, formatCompactCount(option.PopularityDownloads)+" "+label)
+	}
 	if len(parts) == 0 {
 		return "size unknown"
 	}
 	return strings.Join(parts, " · ")
+}
+
+func formatCompactCount(count int64) string {
+	type scale struct {
+		value  int64
+		suffix string
+	}
+	for _, candidate := range []scale{{1_000_000_000, "B"}, {1_000_000, "M"}, {1_000, "K"}} {
+		if count >= candidate.value {
+			value := float64(count) / float64(candidate.value)
+			if value == float64(int64(value)) {
+				return fmt.Sprintf("%.0f%s", value, candidate.suffix)
+			}
+			return fmt.Sprintf("%.1f%s", value, candidate.suffix)
+		}
+	}
+	return fmt.Sprintf("%d", count)
 }
 
 func providerStatus(result setup.EndpointResult, ready bool) string {

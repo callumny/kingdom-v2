@@ -21,6 +21,8 @@ type Presentation struct {
 	ModelDownloadPosition, ModelDownloadCount                int
 	ModelQuery, ModelSearchWarning                           string
 	ModelSearchActive, ModelSearching                        bool
+	ModelPopularLoading                                      bool
+	ModelPopularWarning                                      string
 	ModelDownloadConfirming                                  bool
 	ModelDownloadActive                                      bool
 	ModelDownloadError                                       string
@@ -61,7 +63,7 @@ func ViewWithPresentation(width, height int, setupRequired bool, wf *setup.Workf
 			body, footer = providersSetupView(wf, p)
 		case setup.StateModels:
 			progress = setupProgress(2)
-			body, footer = modelsSetupView(wf, p)
+			body, footer = modelsSetupView(wf, p, height)
 		case setup.StateWizard:
 			progress = setupProgress(3)
 			body, footer = wizardSetupView(wf, p, royalContentWidth(width))

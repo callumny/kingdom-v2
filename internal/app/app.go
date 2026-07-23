@@ -64,6 +64,7 @@ type Model struct {
 	localModels             localModelState
 	installer               ProviderInstaller
 	modelSearch             ModelSearcher
+	modelPopular            PopularModelSource
 	providerCursor          int
 	providerConfirming      bool
 	providerInstalling      bool
@@ -81,6 +82,11 @@ type Model struct {
 	modelSearchWarning      string
 	modelSearchGen          uint64
 	modelSearchCancel       context.CancelFunc
+	popularModels           []modelcatalog.Model
+	modelPopularLoading     bool
+	modelPopularWarning     string
+	modelPopularGen         uint64
+	modelPopularCancel      context.CancelFunc
 	modelDownloadConfirming bool
 	modelDownloader         ModelDownloader
 	modelDownloadActive     bool
@@ -145,6 +151,7 @@ type Services struct {
 	LocalModels   LocalModelManager
 	Installer     ProviderInstaller
 	ModelSearch   ModelSearcher
+	ModelPopular  PopularModelSource
 	ModelDownload ModelDownloader
 	ModelRemove   ModelRemover
 	PrepareWizard WizardPrepareFunc
@@ -167,6 +174,10 @@ type ProviderInstaller interface {
 
 type ModelSearcher interface {
 	Search(context.Context, modelcatalog.Provider, string, int) ([]modelcatalog.Model, error)
+}
+
+type PopularModelSource interface {
+	Popular(context.Context, modelcatalog.Provider, int) ([]modelcatalog.Model, error)
 }
 
 type ModelDownloader interface {
@@ -199,6 +210,12 @@ type modelInventoryMsg struct {
 }
 
 type modelSearchMsg struct {
+	generation uint64
+	models     []modelcatalog.Model
+	warnings   []string
+}
+
+type modelPopularMsg struct {
 	generation uint64
 	models     []modelcatalog.Model
 	warnings   []string
@@ -257,6 +274,7 @@ func NewWithServices(c config.Config, services Services) Model {
 		localModels:     localModelState{manager: services.LocalModels},
 		installer:       services.Installer,
 		modelSearch:     services.ModelSearch,
+		modelPopular:    services.ModelPopular,
 		modelDownloader: services.ModelDownload,
 		modelRemover:    services.ModelRemove,
 		prepareWizard:   services.PrepareWizard,
@@ -326,6 +344,9 @@ func (m Model) startSetup() Model {
 	m.modelRemoveConfirming, m.modelRemoveActive = false, false
 	m.modelRemoveTarget = setup.ModelOption{}
 	m.modelRemoveNotice = ""
+	m.cancelPopularModels()
+	m.popularModels = nil
+	m.modelPopularWarning = ""
 	m.modelsReturnToReady = false
 	m.scanning = m.discover != nil
 	return m
@@ -388,6 +409,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.modelCursor >= count {
 			m.modelCursor = count - 1
 		}
+		return m.beginPopularModels()
 	case modelSearchMsg:
 		if m.workflow == nil || m.screen != setup.StateModels || x.generation != m.modelSearchGen {
 			return m, nil
@@ -400,6 +422,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelCursor = 0
 		} else if m.modelCursor >= count {
 			m.modelCursor = count - 1
+		}
+	case modelPopularMsg:
+		if m.workflow == nil || m.screen != setup.StateModels || x.generation != m.modelPopularGen {
+			return m, nil
+		}
+		m.modelPopularLoading = false
+		m.modelPopularCancel = nil
+		m.popularModels = append([]modelcatalog.Model(nil), x.models...)
+		m.modelPopularWarning = strings.Join(x.warnings, "; ")
+		if !m.modelSearchActive && strings.TrimSpace(m.modelQuery) == "" {
+			m.replaceVisibleModels(m.popularModels)
+			if count := len(m.workflow.Draft.Catalog()); count == 0 {
+				m.modelCursor = 0
+			} else if m.modelCursor >= count {
+				m.modelCursor = count - 1
+			}
 		}
 	case modelDownloadEventMsg:
 		if !m.modelDownloadActive || x.generation != m.modelDownloadGen {
@@ -1178,6 +1216,8 @@ func (m Model) presentation() ui.Presentation {
 		ModelSearchActive:       m.modelSearchActive,
 		ModelSearching:          m.modelSearching,
 		ModelSearchWarning:      m.modelSearchWarning,
+		ModelPopularLoading:     m.modelPopularLoading,
+		ModelPopularWarning:     m.modelPopularWarning,
 		ModelDownloadConfirming: m.modelDownloadConfirming,
 		ModelDownloadActive:     m.modelDownloadActive,
 		ModelDownloadProgress:   m.modelDownloadProgress,

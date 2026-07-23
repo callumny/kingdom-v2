@@ -22,6 +22,20 @@ type fakeModelSearcher struct {
 	queries map[string][]modelcatalog.Model
 }
 
+type fakePopularModelSource struct {
+	mu      sync.Mutex
+	calls   []modelcatalog.Provider
+	results map[modelcatalog.Provider][]modelcatalog.Model
+	errors  map[modelcatalog.Provider]error
+}
+
+func (f *fakePopularModelSource) Popular(_ context.Context, provider modelcatalog.Provider, _ int) ([]modelcatalog.Model, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, provider)
+	return append([]modelcatalog.Model(nil), f.results[provider]...), f.errors[provider]
+}
+
 type fakeModelDownloader struct {
 	requests []localmodels.DownloadRequest
 	err      error
@@ -115,6 +129,81 @@ func TestModelsSearchIgnoresResultsFromAnOlderQuery(t *testing.T) {
 	m, _ = update(m, currentSearch())
 	if !strings.Contains(m.View().Content, "current-qw-result") {
 		t.Fatalf("current search result missing: %s", m.View().Content)
+	}
+}
+
+func TestModelsScreenLoadsPopularModelsAfterInstalledInventory(t *testing.T) {
+	popular := &fakePopularModelSource{results: map[modelcatalog.Provider][]modelcatalog.Model{
+		modelcatalog.Ollama: {
+			{Provider: modelcatalog.Ollama, ID: "deepseek-r1:8b", PopularityRank: 1, Downloads: 90_300_000, ParameterSize: "8B"},
+			{Provider: modelcatalog.Ollama, ID: "llama3.1:8b", PopularityRank: 2, Downloads: 80_000_000, ParameterSize: "8B"},
+		},
+		modelcatalog.MLX: {
+			{Provider: modelcatalog.MLX, ID: "mlx-community/Qwen3-4B-4bit", PopularityRank: 1, Downloads: 900_000, ParameterSize: "4B"},
+		},
+	}}
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "llama3.1:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+	}}}
+	services := Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelPopular: popular}
+	m := NewWithServices(config.Default(), services)
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0]}, {Endpoint: discovery.DefaultEndpoints()[1]}})
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m.workflow.Draft.Config.Providers.MLX.Enabled = true
+	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
+	m.workflow.Draft.SetProviderReady(setup.MLXEndpointID, true)
+
+	m, inventory := update(m, key("enter"))
+	m, popularCommand := update(m, inventory())
+	if popularCommand == nil || !strings.Contains(m.View().Content, "Finding popular Ollama and MLX models") {
+		t.Fatalf("popular lookup did not follow inventory: command=%v view=%s", popularCommand, m.View().Content)
+	}
+	m, _ = update(m, popularCommand())
+	view := m.View().Content
+	for _, want := range []string{"Installed models", "Popular on Ollama", "Popular on MLX", "deepseek-r1:8b", "mlx-community/Qwen3-4B-4bit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("popular catalogue missing %q: %s", want, view)
+		}
+	}
+	if strings.Count(view, "llama3.1:8b") != 1 {
+		t.Fatalf("installed popular model was duplicated: %s", view)
+	}
+	m, _ = update(m, key("down"))
+	m, _ = update(m, key(" "))
+	pending := m.workflow.Draft.PendingDownloads()
+	if len(pending) != 1 || pending[0].Ref.ModelID != "deepseek-r1:8b" {
+		t.Fatalf("popular model was not selectable as a pending download: %+v", pending)
+	}
+	popular.mu.Lock()
+	defer popular.mu.Unlock()
+	if len(popular.calls) != 2 {
+		t.Fatalf("popular providers queried=%v", popular.calls)
+	}
+}
+
+func TestModelsScreenKeepsOneProvidersPopularModelsWhenTheOtherFails(t *testing.T) {
+	popular := &fakePopularModelSource{
+		results: map[modelcatalog.Provider][]modelcatalog.Model{
+			modelcatalog.Ollama: {{Provider: modelcatalog.Ollama, ID: "llama3.2", PopularityRank: 1}},
+		},
+		errors: map[modelcatalog.Provider]error{modelcatalog.MLX: errors.New("offline")},
+	}
+	manager := &fakeLocalModelManager{runtimes: []localmodels.Runtime{{
+		Kind: localmodels.KindOllama, Models: []localmodels.Model{{ID: "llama3.1:8b"}}, Endpoint: topology.Endpoint{ID: setup.OllamaEndpointID, Name: "Ollama"},
+	}}}
+	m := NewWithServices(config.Default(), Services{Defaults: discovery.DefaultEndpoints(), LocalModels: manager, ModelPopular: popular})
+	m.workflow.Draft.ApplyResults([]setup.EndpointResult{{Endpoint: discovery.DefaultEndpoints()[0]}, {Endpoint: discovery.DefaultEndpoints()[1]}})
+	m.workflow.Draft.Config.Providers.Ollama.Enabled = true
+	m.workflow.Draft.Config.Providers.MLX.Enabled = true
+	m.workflow.Draft.SetProviderReady(setup.OllamaEndpointID, true)
+	m.workflow.Draft.SetProviderReady(setup.MLXEndpointID, true)
+
+	m, inventory := update(m, key("enter"))
+	m, popularCommand := update(m, inventory())
+	m, _ = update(m, popularCommand())
+	view := m.View().Content
+	if !strings.Contains(view, "llama3.2") || !strings.Contains(view, "MLX popularity temporarily unavailable") {
+		t.Fatalf("partial popular result was not preserved: %s", view)
 	}
 }
 

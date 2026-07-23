@@ -42,6 +42,7 @@ func main() {
 	providerInstaller := localmodels.NewInstaller(localmodels.OSSystem{}, runtimeRoot)
 	modelDownloader := localmodels.NewDownloader(localmodels.OSSystem{}, nil, runtimeRoot, mlxCacheRoot)
 	client := modelapi.NewClient()
+	modelCatalog := modelcatalog.DefaultRemote(nil)
 	workspace, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -91,7 +92,8 @@ func main() {
 		Memory:        memoryStore,
 		LocalModels:   localModelManager,
 		Installer:     providerInstaller,
-		ModelSearch:   modelcatalog.DefaultRemote(nil),
+		ModelSearch:   modelCatalog,
+		ModelPopular:  modelCatalog,
 		ModelDownload: modelDownloader,
 		ModelRemove:   modelDownloader,
 		PrepareWizard: func(ctx context.Context, cfg config.Config, model setup.ModelOption) (setup.ModelOption, error) {
