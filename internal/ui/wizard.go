@@ -35,30 +35,44 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 	body = append(body, "", royalGold.Render("Proposed Kingdom"))
 	roles := wf.Draft.Config.Topology.Roles
 	body = append(body,
-		fmt.Sprintf("King:       %s", assignmentLabel(roles.King, wf)),
-		fmt.Sprintf("Worker:     %s", assignmentLabel(roles.Worker, wf)),
+		wizardSettingHeader(),
+		royalRule.Render(strings.Repeat("─", min(contentWidth, 62))),
+		wizardSettingRow("King model", assignmentLabel(roles.King, wf)),
+		"",
+		wizardSettingRow("Worker model", assignmentLabel(roles.Worker, wf)),
+		"",
 	)
 	if wf.Draft.Config.CouncilEnabled {
-		body = append(body, fmt.Sprintf("Council:    %s · %d members", assignmentLabel(roles.Council, wf), wf.Draft.Config.CouncilSize))
+		body = append(body,
+			wizardSettingRow("Council", royalGreen.Render("Enabled")),
+			wizardSettingRow("Council model", assignmentLabel(roles.Council, wf)),
+			wizardSettingRow("Council members", royalText.Render(fmt.Sprintf("%d", wf.Draft.Config.CouncilSize))),
+		)
 	} else {
-		body = append(body, "Council:    "+royalMuted.Render("disabled"))
+		body = append(body, wizardSettingRow("Council", royalMuted.Render("Disabled")))
 	}
-	body = append(body, fmt.Sprintf("Concurrent workers: %d", wf.Draft.Config.WorkerConcurrency))
+	body = append(body, "",
+		wizardSettingRow("Concurrent workers", royalText.Render(fmt.Sprintf("%d", wf.Draft.Config.WorkerConcurrency))),
+		"",
+	)
 	if hasManagedOllamaSelection(wf) {
-		mode := "shared server"
+		mode := "Shared server"
 		if wf.Draft.Config.Providers.Ollama.PortMode == config.OllamaDedicatedPorts {
-			mode = "separate servers"
+			mode = "Separate per model"
 		}
-		body = append(body, fmt.Sprintf("Ollama:     %s · base port %d", mode, wf.Draft.Config.Providers.Ollama.Port))
+		body = append(body, wizardSettingRow("Ollama servers", royalText.Render(fmt.Sprintf("%s · base port %d", mode, wf.Draft.Config.Providers.Ollama.Port))))
 	}
 	if hasManagedMLXSelection(wf) {
-		body = append(body, fmt.Sprintf("MLX:        one server per model · base port %d", wf.Draft.Config.Providers.MLX.Port))
+		body = append(body, wizardSettingRow("MLX servers", royalText.Render(fmt.Sprintf("One per model · base port %d", wf.Draft.Config.Providers.MLX.Port))))
 	}
 	body = append(body, "")
 	if p.WizardBusy {
 		body = append(body, royalCyan.Render("Wizard is thinking…"))
 	} else {
-		body = append(body, royalText.Render("Ask: "+p.WizardInput+"▏"))
+		body = append(body,
+			royalText.Render("Ask: "+p.WizardInput+"▏"),
+			royalMuted.Render("Try: “What does Council do?” · “Why use separate Ollama servers?”"),
+		)
 	}
 	footer := "Type a question or change   •   Ctrl+Enter Send   •   Tab Manual setup   •   Esc Back"
 	if p.WizardReady {
@@ -71,6 +85,16 @@ func wizardSetupView(wf *setup.Workflow, p Presentation, contentWidth int) ([]st
 		body = append(body, "", royalRed.Render(wf.Err.Error()))
 	}
 	return body, royalMuted.Render(footer)
+}
+
+const wizardSettingLabelWidth = 22
+
+func wizardSettingHeader() string {
+	return royalMuted.Render(fmt.Sprintf("%-*s", wizardSettingLabelWidth, "Setting")) + royalMuted.Render("Value")
+}
+
+func wizardSettingRow(setting, value string) string {
+	return royalMuted.Render(fmt.Sprintf("%-*s", wizardSettingLabelWidth, setting)) + value
 }
 
 func wizardGuidance(wf *setup.Workflow, contentWidth int) []string {

@@ -56,6 +56,9 @@ func (e *Engine) Respond(ctx context.Context, userMessage string) (Reply, error)
 	if strings.TrimSpace(userMessage) == "" {
 		return Reply{}, errors.New("Wizard message is required")
 	}
+	if explanation, ok := configurationExplanation(userMessage); ok {
+		return Reply{Content: explanation, Ready: e.session.Ready()}, nil
+	}
 	if len(e.history) == 0 {
 		prompt, err := e.systemPrompt(ctx)
 		if err != nil {

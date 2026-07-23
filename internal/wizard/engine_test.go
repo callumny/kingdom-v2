@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -213,6 +214,58 @@ func TestWizardCanAnswerSetupQuestionsWithoutChangingSettings(t *testing.T) {
 	}
 	if draft.Config.CouncilEnabled {
 		t.Fatalf("answering a question changed setup: %+v", draft.Config)
+	}
+}
+
+func TestWizardExplainsConfigurationFieldsWithoutCallingTheModelOrChangingSettings(t *testing.T) {
+	draft := wizardDraft(t)
+	if err := draft.ApplyRoleSuggestions(); err != nil {
+		t.Fatal(err)
+	}
+	before := draft.Config
+	client := &wizardChatClient{responses: []string{
+		`{"type":"message","content":"The model attempted to explain the setting.","ready":true}`,
+	}}
+
+	engine := NewEngine(client, draft.SelectedModels()[1], NewSession(draft))
+	reply, err := engine.Respond(
+		context.Background(),
+		"What do concurrent workers mean?",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"maximum number of Worker tasks",
+		"not a time limit or a tool-call limit",
+		"More concurrent work can be faster",
+		"No settings changed.",
+	} {
+		if !strings.Contains(reply.Content, want) {
+			t.Fatalf("explanation missing %q: %+v", want, reply)
+		}
+	}
+	if !reply.Ready || reply.Changed {
+		t.Fatalf("explanation incorrectly changed readiness: %+v", reply)
+	}
+	for _, question := range []struct {
+		message string
+		want    string
+	}{
+		{"Can you explain council members?", "independent reviewers"},
+		{"Why use separate Ollama servers?", "reduces contention"},
+		{"What do the different configuration fields mean?", "Provider server and port settings"},
+	} {
+		reply, err = engine.Respond(context.Background(), question.message)
+		if err != nil || !strings.Contains(reply.Content, question.want) || !strings.Contains(reply.Content, "No settings changed.") {
+			t.Fatalf("question %q reply=%+v err=%v", question.message, reply, err)
+		}
+	}
+	if len(client.messages) != 0 {
+		t.Fatalf("configuration glossary called the model: %+v", client.messages)
+	}
+	if !reflect.DeepEqual(draft.Config, before) {
+		t.Fatalf("configuration question mutated draft:\nbefore=%+v\nafter=%+v", before, draft.Config)
 	}
 }
 

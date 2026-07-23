@@ -148,6 +148,76 @@ func TestWizardViewWrapsLongConversationMessages(t *testing.T) {
 	assertViewFits(t, view, 64, 40)
 }
 
+func TestWizardProposedKingdomUsesAlignedSettingAndValueColumns(t *testing.T) {
+	w := managedOllamaPerformanceWorkflow(config.OllamaDedicatedPorts)
+	w.State = setup.StateWizard
+	w.Draft.ReplaceCatalog([]setup.ModelOption{
+		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "large"}, Endpoint: w.Draft.Config.Topology.Endpoints[0], Installed: true},
+		{Ref: setup.ModelRef{EndpointID: setup.OllamaEndpointID, ModelID: "small"}, Endpoint: w.Draft.Config.Topology.Endpoints[0], Installed: true},
+	})
+	view := ansi.Strip(ViewWithPresentation(100, 50, true, w, Presentation{WizardReady: true}).Content)
+
+	labels := []string{
+		"King model",
+		"Worker model",
+		"Council",
+		"Council model",
+		"Council members",
+		"Concurrent workers",
+		"Ollama servers",
+	}
+	valueColumn := -1
+	lineByLabel := make(map[string]int, len(labels))
+	proposalStart := strings.Index(view, "Proposed Kingdom")
+	if proposalStart == -1 {
+		t.Fatalf("missing Proposed Kingdom:\n%s", view)
+	}
+	lines := strings.Split(view[proposalStart:], "\n")
+	for _, label := range labels {
+		for index, line := range lines {
+			line = strings.TrimLeft(line, " ")
+			if !strings.HasPrefix(line, label) {
+				continue
+			}
+			lineByLabel[label] = index
+			column := len(label)
+			for column < len(line) && line[column] == ' ' {
+				column++
+			}
+			if valueColumn == -1 {
+				valueColumn = column
+			} else if column != valueColumn {
+				t.Fatalf("%q value starts at column %d, want %d:\n%s", label, column, valueColumn, view)
+			}
+			break
+		}
+		if _, ok := lineByLabel[label]; !ok {
+			t.Fatalf("missing proposed setting %q:\n%s", label, view)
+		}
+	}
+
+	for _, pair := range [][2]string{
+		{"King model", "Worker model"},
+		{"Worker model", "Council"},
+		{"Council members", "Concurrent workers"},
+		{"Concurrent workers", "Ollama servers"},
+	} {
+		if lineByLabel[pair[1]]-lineByLabel[pair[0]] < 2 {
+			t.Fatalf("settings %q and %q are not visually separated:\n%s", pair[0], pair[1], view)
+		}
+	}
+	for _, want := range []string{
+		"Setting",
+		"Value",
+		"Try: “What does Council do?”",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("Wizard proposal missing %q:\n%s", want, view)
+		}
+	}
+	assertViewFits(t, view, 100, 50)
+}
+
 func assertViewFits(t *testing.T, view string, width, height int) {
 	t.Helper()
 	lines := strings.Split(view, "\n")
