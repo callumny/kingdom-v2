@@ -98,7 +98,12 @@ Ask the Wizard to change a role assignment, enable or disable the Council, adjus
 concurrent Workers, change ports, or choose shared versus separate Ollama servers. Press `Enter` to
 apply the proposal and launch Kingdom. Press `Tab` at any time to use the model-free manual setup.
 
-![Kingdom setup Wizard showing role guidance and the proposed configuration](docs/images/setup-wizard.png)
+You can also ask what any setting means—for example, “What do concurrent workers mean?” Kingdom
+answers common setup questions directly without changing the proposal and clearly confirms that no
+settings changed. The proposal is displayed in aligned **Setting** and **Value** columns so role,
+performance, and provider choices are easy to scan.
+
+![Kingdom setup Wizard explaining concurrent Workers and showing aligned Setting and Value columns](docs/images/setup-wizard.png)
 
 ## Main prompt
 
